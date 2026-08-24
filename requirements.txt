@@ -1,0 +1,7 @@
+ir-sim==2.10.1
+torch>=2.0
+numpy>=1.24
+scipy>=1.10
+PyYAML>=6.0
+tensorboard>=2.13
+onnx>=1.14

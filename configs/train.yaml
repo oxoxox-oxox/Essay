@@ -1,0 +1,96 @@
+# TD3（纯全连接，无 CNN）+ INT8 PTQ 训练/导出 总配置
+# 说明：以该文件所在目录为 project root，脚本从仓库根目录运行。
+
+project:
+  run_dir: "runs"
+  checkpoint_dir: "checkpoints"
+  buffer_dir: "buffers"
+  export_dir: "export"
+  deploy_models_dir: "deploy/td3_nav/models"   # 导出产物自动同步到此，便于整包 scp
+
+# ir-sim 环境（把世界 YAML 放进 configs/world/，这里填文件名即可）
+env:
+  world_name: "configs/world/robot_world.yaml"   # 训练场景
+  eval_world: "configs/world/eval_world.yaml"    # 评估场景（eval 相关代码统一使用）
+  display: false
+  log_level: "WARNING"
+  random_start: true                             # 每个 episode 随机机器人初始位置
+  start_range_low: [1.0, 1.0, -3.14]             # 随机起点下限 [x, y, theta]
+  start_range_high: [9.0, 9.0, 3.14]             # 随机起点上限 [x, y, theta]
+  fixed_goal: [9.0, 9.0, 0.0]                    # 固定目标点（世界 YAML 的 goal 亦保持固定）
+
+obs:
+  lidar_len: 100            # 仅作参考/一致性检查，实际以 env 读到的 beam 数为准
+  lidar_range_max: 7.0     # 归一化用，应与世界 YAML 中 lidar2d.range_max 一致
+  max_bins: 100             # lidar 分箱数（DRL TD3 风格：每 bin_size 束取 min / range_max；=lidar_len 时不降维）
+  include_goal: true        # 观测是否拼接 goal 极坐标
+  goal_dim: 3               # [dist/goal_dist_norm, cos, sin]
+  goal_dist_norm: 10.0      # goal 距离归一化除数（对齐 DRL TD3 的 distance/10）
+  include_prev_action: true # 观测中编码上一 chunk 动作（每步按 DRL 归一化 [lin*2, (ang+1)/2]），prev_dim=chunk.size*action_dim
+
+action:
+  action_dim: 2             # [linear_vel, angular_vel]（diff 机器人）
+  vel_min: [-1.0, -1.0]
+  vel_max: [1.0, 1.0]
+
+reward:
+  # 对齐 DRL-robot-navigation-IR-SIM 的奖励（SIM.get_reward）
+  # 到达 +goal_reward；碰撞 +collision_penalty；
+  # 其他: +lin_vel - ang_penalty_scale*|ang_vel| - 障碍贴近惩罚
+  # 障碍贴近惩罚: min(激光距离) < proximity_threshold 时，
+  #   减去 proximity_scale * (proximity_threshold - min_laser)，越近罚越多。
+  goal_reward: 100.0
+  collision_penalty: -100.0
+  proximity_threshold: 1.35    # 障碍贴近惩罚阈值（米），对齐原版
+  proximity_scale: 0.5         # (threshold - min_laser) 的缩放系数
+  ang_penalty_scale: 0.5       # |angular_vel| 惩罚系数
+  backward_penalty: 0.0        # 倒退惩罚：原版无，置 0 关闭
+  max_steps: 500               # 单 episode 最大控制步数（决策步=env step）
+
+model:
+  encoder_type: "mlp"      # 纯全连接 TD3（无 CNN，导出 ONNX 全图 GEMM，TRT 可整体降精度、无反复 cast）
+  hidden1: 1024             # MLP 第一层隐藏宽度（路径A：400→1024，MACs 0.17M→1.17M，让 batch≥8 的 INT8 收益可显现）
+  hidden2: 1024             # MLP 第二层隐藏宽度（路径A：300→1024）
+
+td3:
+  actor_lr: 1.0e-4
+  critic_lr: 1.0e-3
+  gamma: 0.99
+  tau: 0.005
+  policy_noise: 0.2         # target 动作平滑噪声（相对动作范围 [-1,1]）
+  noise_clip: 0.5
+  exploration_noise: 0.2    # 训练时 exploration 高斯噪声
+  policy_delay: 2
+  batch_size: 64            # 训练 batch（对齐原版）
+  buffer_size: 500000
+
+train:
+  # 轮次制训练（对齐 compare/train_c.py）：epoch × episode
+  # 注意：N>1 时 episode 很短（策略变好后 ~10 决策步/集），更新比率 = iterations/(train_every_n*平均集长)
+  #   80 次/2 集 ≈ 4 次/步 会导致 Q 值发散（实测 chunk=5 在 ~30 epoch 崩溃）；
+  #   20 次/2 集 虽稳定但早期长 episode 下学习过慢（实测 15.7 万步仍 0% 成功率）；
+  #   400 宽模型取 40 次/2 集稳定；1024 宽容量更大更易发散 → 降到 30（若学习过慢可回 40，需盯 q_value）。
+  #   导出/校准一律用 model_best.pt（峰值）。
+  max_epochs: 60            # 最大 epoch 数（N5 实测 epoch 10 即到 0.9，60 够用）
+  episodes_per_epoch: 70    # 每个 epoch 包含的 episode 数
+  train_every_n: 2          # 每 N 个 episode 训练一次
+  training_iterations: 30   # 每次训练调用的梯度更新次数（1024 宽模型：40 偏险 / 30 保守）
+  max_steps: 200            # 单 episode 最大决策步数
+  eval_episodes: 10         # 每 epoch 评估的 episode 数
+  save_every_epoch: 10      # 每多少 epoch 保存 checkpoint
+  save_buffer: true         # 保存 replay buffer 供 QAT 离线微调
+  parallel_workers: 8       # 并行采样 worker 数（>1 启用多进程并行环境，吞吐量近似线性提升）
+                            # 单 worker 时退化为原单进程训练；命令行 --parallel-workers 可覆盖
+
+chunk:
+  size: 1                   # action chunking：N。1=无 chunking
+
+eval:
+  episodes: 20
+  episodes_dynamic: 20
+  episodes_visual: 3        # 可视化(  display: false)时只跑几个 episode
+  max_steps: 500
+
+benchmark:
+  iterations: 500
+  warmup: 100

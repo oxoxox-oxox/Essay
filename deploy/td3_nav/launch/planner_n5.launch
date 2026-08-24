@@ -1,0 +1,15 @@
+<launch>
+  <!-- N5 部署（action chunking N=5）：obs [1,113]，一次推理开环执行 5 步（每步 0.3s）。
+       引擎需用 N5 的 onnx 在板子上生成（bench_engines.sh 或 trtexec int8/fp16/noTF32）。 -->
+  <!-- 注意：XML 注释内不能出现双连字符（如命令行参数 int8 写成双横线前缀），会报 not well-formed 语法错误。 -->
+  <!-- engine_path 可指定任意精度的 batch=1 引擎，例如 INT8：$(find td3_nav)/models/actor_int8.engine。 -->
+  <arg name="engine_path" default="$(find td3_nav)/models/actor_fp16.engine"/>
+
+  <rosparam file="$(find td3_nav)/config/params.yaml" command="load"/>
+  <param name="planner/engine_path" value="$(arg engine_path)"/>
+  <param name="planner/chunk_size" value="5"/>
+
+  <node pkg="td3_nav" type="planner_node" name="planner_node" output="screen"/>
+
+  <node pkg="td3_nav" type="safety_node" name="safety_node" output="screen"/>
+</launch>

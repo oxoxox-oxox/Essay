@@ -1,0 +1,35 @@
+# TD3 部署参数（launch 里 <rosparam command="load"> 到全局命名空间）
+
+planner:
+  goal_x: 5.0            # 目标点 x（odom_combined 系，相对起点）
+  goal_y: 5.0            # 目标点 y
+  control_period: 0.3    # 决策周期（秒），对齐训练 step_time
+  scan_timeout: 0.5      # scan 超过该时长视为超时 -> 停车
+  debug_log: false
+
+  # ---- 与训练侧对齐（一般不要动）----
+  num_beams: 100         # 训练 lidar 光束数
+  range_max_norm: 7.0    # 训练归一化量程
+  half_fov_deg: 90.0     # 前向半视场
+  reverse_scan: false    # /scan 数组反序开关（现场校验后设置）
+  laser_yaw_fallback_deg: 180.0  # tf 查不到时的兜底 yaw(laser->base_link)
+
+  # ---- action chunking ----
+  chunk_size: 1          # 一次推理输出的动作步数 N（N=1 单步；N=5 -> obs [1,113] 开环 5 步）
+                         # 由对应 launch 覆盖（planner_n5.launch 置 5）
+
+  # ---- 动作映射 ----
+  vel_min: [-1.0, -1.0]  # 归一化动作 -> 真实速度 下限 [lin, ang]
+  vel_max: [1.0, 1.0]    # 上限 [lin, ang]（训练值）
+  max_linear: 0.8        # 下发限幅（真机安全上限）
+  max_angular: 1.0
+
+safety:
+  stop_dist: 0.35        # 最近障碍 < 此值 -> 急停
+  slow_dist: 0.6         # < 此值 -> 按 slow_factor 减速
+  slow_factor: 0.4
+  min_voltage: 10.5      # 电量低于 -> 停车
+  watchdog_timeout: 0.6  # planner 输出超时 -> 停车
+  max_linear: 0.8
+  max_angular: 1.0
+  front_only: false      # true 时只检查前向±90° 最近距离
