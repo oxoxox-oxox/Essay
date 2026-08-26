@@ -4,6 +4,7 @@
     - 到达目标: +goal_reward (默认 100)
     - 碰撞:     +collision_penalty (默认 -100)
     - 其他:     +lin_vel - ang_penalty_scale*|ang_vel| - 障碍贴近惩罚
+                - time_penalty                       # 每步时间惩罚（鼓励尽快到达）
                 + goal_angle_coef * cos(与目标夹角)      # 朝目标方向有奖励（修复空场绕圈）
                 + goal_dist_coef * (上一距离 - 当前距离)  # 靠近目标 shaping（potential 式，每米）
 
@@ -28,7 +29,7 @@ class RewardFn:
         self.cfg = cfg
         self.goal_reward = float(cfg.get("goal_reward", 100.0))
         self.collision_penalty = float(cfg.get("collision_penalty", -100.0))
-        self.time_penalty = float(cfg.get("time_penalty", 0.0))
+        self.time_penalty = float(cfg.get("time_penalty") or 0.0)
         self.backward_penalty = float(cfg.get("backward_penalty", 0.0))
         self.proximity_threshold = float(cfg.get("proximity_threshold", 0.5))
         self.proximity_scale = float(cfg.get("proximity_scale", 0.5))
@@ -73,7 +74,7 @@ class RewardFn:
         lin = float(action[0]) if action is not None else 0.0
         ang = float(action[1]) if action is not None else 0.0
 
-        reward = lin - self.ang_penalty_scale * abs(ang)
+        reward = lin - self.ang_penalty_scale * abs(ang) - self.time_penalty
 
         if lin < 0.0:
             reward += self.backward_penalty * abs(lin)

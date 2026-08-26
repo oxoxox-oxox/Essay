@@ -62,9 +62,9 @@ reward:
   # 其他: +lin_vel - ang_penalty_scale*|ang_vel| - 障碍贴近惩罚
   # 障碍贴近惩罚: min(激光距离) < proximity_threshold 时，
   #   减去 proximity_scale * (proximity_threshold - min_laser)，越近罚越多。
-  goal_reward: 100.0
+  goal_reward: 400.0
   collision_penalty: -100.0
-  proximity_threshold: 1.35    # 障碍贴近惩罚阈值（米），对齐原版
+  proximity_threshold: 5    # 障碍贴近惩罚阈值（米），对齐原版
   proximity_scale: 0.5         # (threshold - min_laser) 的缩放系数
   ang_penalty_scale: 0.5       # |angular_vel| 惩罚系数
   backward_penalty: 0.0        # 倒退惩罚：原版无，置 0 关闭
@@ -72,6 +72,7 @@ reward:
   goal_angle_coef: 0.5         # 朝目标方向奖励系数：+coef*cos(与目标夹角)，朝向+、背对-
   goal_dist_coef: 1.0          # 靠近目标 shaping：每靠近 1m 得 +coef（potential 式，置 0 关闭）
   max_steps: 1800              # 单 episode 最大控制步数（83ms/步 × 1800 ≈ 150s，对齐原 0.3s×500）
+  time_penalty: 0.1            # 每步时间惩罚（非到达/碰撞步都减去该值，鼓励尽快到达）
 
 model:
   hidden1: 1024             # SB3 MlpPolicy 第一层隐藏宽度
