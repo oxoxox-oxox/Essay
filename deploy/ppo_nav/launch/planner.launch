@@ -1,0 +1,10 @@
+<launch>
+  <arg name="engine_path" default="$(find ppo_nav)/models/actor_int8.engine"/>
+
+  <rosparam file="$(find ppo_nav)/config/params.yaml" command="load"/>
+  <param name="planner/engine_path" value="$(arg engine_path)"/>
+
+  <node pkg="ppo_nav" type="planner_node" name="planner_node" output="screen"/>
+
+  <node pkg="ppo_nav" type="safety_node" name="safety_node" output="screen"/>
+</launch>

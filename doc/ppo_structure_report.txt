@@ -1,0 +1,172 @@
+python: D:\anaconda\envs\rl_env\python.exe
+SB3: 2.9.0  torch: 2.11.0+cu128
+
+=== checkpoints/ppo_N1/best_model.zip ===
+policy_class      : ActorCriticPolicy
+observation_space : shape=(105,) dtype=float32
+action_space      : shape=(2,) low=[-1. -1.] high=[1. 1.]
+net_arch          : [1024, 1024]
+activation_fn     : Tanh
+squash_output     : False
+share_features    : True
+--- 子网络（mlp_extractor + 输出头） ---
+  [mlp_extractor.policy_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [mlp_extractor.value_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [action_net]
+    0: Linear(1024 -> 2)  params=2050
+  [value_net]
+    0: Linear(1024 -> 1)  params=1025
+--- 参数量 ---
+  mlp_extractor(共享+双头前置) : 2316288
+  action_net                 : 2050
+  value_net(输出层)           : 1025
+  策略总参数量                : 2319365
+--- 超参数（zip 内保存值） ---
+  learning_rate : 0.0003
+  gamma         : 0.99
+  gae_lambda    : 0.95
+  n_steps       : 1024
+  batch_size    : 128
+  n_epochs      : 10
+  clip_range    : FloatSchedule(ConstantSchedule(val=0.2))
+  ent_coef      : 0.0
+  vf_coef       : 0.5
+  max_grad_norm : 0.5
+  num_timesteps : 240000
+  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+
+=== checkpoints/ppo_N1/ppo_model.zip ===
+policy_class      : ActorCriticPolicy
+observation_space : shape=(105,) dtype=float32
+action_space      : shape=(2,) low=[-1. -1.] high=[1. 1.]
+net_arch          : [1024, 1024]
+activation_fn     : Tanh
+squash_output     : False
+share_features    : True
+--- 子网络（mlp_extractor + 输出头） ---
+  [mlp_extractor.policy_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [mlp_extractor.value_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [action_net]
+    0: Linear(1024 -> 2)  params=2050
+  [value_net]
+    0: Linear(1024 -> 1)  params=1025
+--- 参数量 ---
+  mlp_extractor(共享+双头前置) : 2316288
+  action_net                 : 2050
+  value_net(输出层)           : 1025
+  策略总参数量                : 2319365
+--- 超参数（zip 内保存值） ---
+  learning_rate : 0.0003
+  gamma         : 0.99
+  gae_lambda    : 0.95
+  n_steps       : 1024
+  batch_size    : 128
+  n_epochs      : 10
+  clip_range    : FloatSchedule(ConstantSchedule(val=0.2))
+  ent_coef      : 0.0
+  vf_coef       : 0.5
+  max_grad_norm : 0.5
+  num_timesteps : 300032
+  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+
+=== checkpoints/ppo_smoke_N1/best_model.zip ===
+policy_class      : ActorCriticPolicy
+observation_space : shape=(105,) dtype=float32
+action_space      : shape=(2,) low=[-1. -1.] high=[1. 1.]
+net_arch          : [1024, 1024]
+activation_fn     : Tanh
+squash_output     : False
+share_features    : True
+--- 子网络（mlp_extractor + 输出头） ---
+  [mlp_extractor.policy_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [mlp_extractor.value_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [action_net]
+    0: Linear(1024 -> 2)  params=2050
+  [value_net]
+    0: Linear(1024 -> 1)  params=1025
+--- 参数量 ---
+  mlp_extractor(共享+双头前置) : 2316288
+  action_net                 : 2050
+  value_net(输出层)           : 1025
+  策略总参数量                : 2319365
+--- 超参数（zip 内保存值） ---
+  learning_rate : 0.0003
+  gamma         : 0.99
+  gae_lambda    : 0.95
+  n_steps       : 1024
+  batch_size    : 128
+  n_epochs      : 10
+  clip_range    : FloatSchedule(ConstantSchedule(val=0.2))
+  ent_coef      : 0.0
+  vf_coef       : 0.5
+  max_grad_norm : 0.5
+  num_timesteps : 10000
+  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+
+=== checkpoints/ppo_smoke_N1/ppo_model.zip ===
+policy_class      : ActorCriticPolicy
+observation_space : shape=(105,) dtype=float32
+action_space      : shape=(2,) low=[-1. -1.] high=[1. 1.]
+net_arch          : [1024, 1024]
+activation_fn     : Tanh
+squash_output     : False
+share_features    : True
+--- 子网络（mlp_extractor + 输出头） ---
+  [mlp_extractor.policy_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [mlp_extractor.value_net]
+    0: Linear(105 -> 1024)  params=108544
+    1: Tanh
+    2: Linear(1024 -> 1024)  params=1049600
+    3: Tanh
+  [action_net]
+    0: Linear(1024 -> 2)  params=2050
+  [value_net]
+    0: Linear(1024 -> 1)  params=1025
+--- 参数量 ---
+  mlp_extractor(共享+双头前置) : 2316288
+  action_net                 : 2050
+  value_net(输出层)           : 1025
+  策略总参数量                : 2319365
+--- 超参数（zip 内保存值） ---
+  learning_rate : 0.0003
+  gamma         : 0.99
+  gae_lambda    : 0.95
+  n_steps       : 1024
+  batch_size    : 128
+  n_epochs      : 10
+  clip_range    : FloatSchedule(ConstantSchedule(val=0.2))
+  ent_coef      : 0.0
+  vf_coef       : 0.5
+  max_grad_norm : 0.5
+  num_timesteps : 20480
+  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+
+done

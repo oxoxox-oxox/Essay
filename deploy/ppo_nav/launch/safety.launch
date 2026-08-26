@@ -1,0 +1,5 @@
+<launch>
+  <rosparam file="$(find ppo_nav)/config/params.yaml" command="load"/>
+
+  <node pkg="ppo_nav" type="safety_node" name="safety_node" output="screen"/>
+</launch>

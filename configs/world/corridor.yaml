@@ -1,0 +1,55 @@
+# Corridor (borrowed from NeuPAN corridor): 30x30 arena with a 7m-wide corridor
+# (walls at y=11.5/18.5, x=4..26) plus two offset barriers -> S-shaped path from
+# left end to right end. Trains close-wall / narrow-passage navigation.
+world:
+  height: 30
+  width: 30
+  step_time: 0.3
+  sample_time: 0.3
+  collision_mode: 'stop'
+  control_mode: 'auto'
+
+robot:
+  - kinematics: {name: 'diff'}
+    shape: {name: 'rectangle', length: 0.4, width: 0.3}   # real robot 40cm(front) x 30cm
+    vel_min: [-1.0, -1.0]
+    vel_max: [1.0, 1.0]
+    state: [6, 15, 0]
+    goal: [24, 15, 0]
+    arrive_mode: position
+    goal_threshold: 0.3
+    sensors:
+      - type: 'lidar2d'
+        range_min: 0
+        range_max: 7
+        angle_range: 3.14
+        number: 100
+        noise: True
+        std: 0.08
+        angle_std: 0.1
+        offset: [0.101, 0, 0]   # real lidar mount 10.1cm in front of base center
+        alpha: 0.3
+    plot:
+      show_trajectory: True
+
+obstacle:
+  # corridor top/bottom walls (y=11.5 / 18.5, x from 4 to 26; corridor mid y=15)
+  - number: 2
+    distribution: {name: 'manual'}
+    shape:
+      - {name: 'rectangle', length: 22, width: 1.0}
+    state: [[15, 11.5, 0], [15, 18.5, 0]]
+
+  # two offset barriers (yaw=1.57 vertical, leave gaps top/bottom -> S-shaped path)
+  - number: 2
+    distribution: {name: 'manual'}
+    shape:
+      - {name: 'rectangle', length: 4, width: 1.5}
+    state: [[9, 15, 1.57], [21, 15, 1.57]]
+
+  # boundary thin-rectangle walls
+  - number: 4
+    distribution: {name: 'manual'}
+    shape:
+      - {name: 'rectangle', length: 30, width: 0.5}
+    state: [[15, 0.25, 0], [15, 29.75, 0], [0.25, 15, 1.57], [29.75, 15, 1.57]]

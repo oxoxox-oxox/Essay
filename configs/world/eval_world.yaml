@@ -7,7 +7,7 @@ world:
 
 robot:
   - kinematics: {name: 'diff'}
-    shape: {name: 'circle', radius: 0.2}
+    shape: {name: 'rectangle', length: 0.4, width: 0.3}   # real robot 40cm(front) x 30cm
     vel_min: [ -1.0, -1.0 ]
     vel_max: [ 1.0, 1.0 ]
     state: [3, 4, 0]
@@ -24,7 +24,7 @@ robot:
         noise: True
         std: 0.08
         angle_std: 0.1
-        offset: [ 0, 0, 0 ]
+        offset: [ 0.101, 0, 0 ]   # real lidar mount 10.1cm in front of base center
         alpha: 0.3
 
     plot:

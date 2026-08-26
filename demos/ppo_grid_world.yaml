@@ -1,0 +1,69 @@
+# ============================================================================ #
+# PPO 迁移演示场景：复刻原 amr_rl_ws（Gazebo）训练场景
+#   - 场地 ±5m（四壁 linestring），对应 environment.world 的墙
+#   - 24 个 0.6x0.6 静态障碍位于偶数格点（除原点），对应 amr_gazebo_env.obstacle_positions
+#   - 机器人 diff、半径 0.15m（diff_robot_base.xacro base_radius=0.15）
+#   - 全向 360 束激光，-pi..+pi、1 deg/束（与 Gazebo ray sensor 一致）
+# 注意：ir-sim 的 WrapTo2Pi 会把 >= 2pi 的 angle_range 包成接近 0，
+#       所以全向激光必须写 6.2830（< 2pi），不能写 6.2832 或 6.3。
+# ============================================================================ #
+world:
+  height: 11
+  width: 11
+  offset: [-5.5, -5.5]  # 视口 = [offset, offset+宽高] = [-5.5, 5.5]^2，完整显示地图（默认 offset=[0,0] 会裁掉左下象限）
+  step_time: 0.1        # 与训练 env.step_time=0.1 一致
+  sample_time: 0.1
+  collision_mode: 'stop'
+
+robot:
+  - kinematics: {name: 'diff'}
+    shape: {name: 'circle', radius: 0.15}
+    vel_min: [0.0, -1.0]      # 与动作空间 Box(low=[0,-1], high=[0.5,1]) 一致
+    vel_max: [0.5, 1.0]
+    state: [0, 0, 0]          # demo 脚本会随机覆盖
+    goal: [4, 4, 0]           # demo 脚本会随机覆盖
+    arrive_mode: position
+    goal_threshold: 0.3       # 与训练 goal_threshold 一致
+
+    sensors:
+      - type: 'lidar2d'
+        range_min: 0.12       # Gazebo ray sensor 的 range min
+        range_max: 3.5        # 训练 obs 的截断距离 max_laser_range
+        angle_range: 6.2830   # 全向：-pi..+pi（必须 < 2pi，见文件头注释）
+        number: 360           # 与 Gazebo 360 束一致（obs 每 6 束取 1 -> 60 束）
+        noise: False          # 噪声由 demo 脚本按训练噪声(std=0.01)可选叠加
+        offset: [0, 0, 0]
+
+    plot:
+      show_trajectory: True
+
+obstacle:
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-4, -4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-2, -4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [0, -4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [2, -4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [4, -4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-4, -2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-2, -2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [0, -2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [2, -2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [4, -2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-4, 0, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-2, 0, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [2, 0, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [4, 0, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-4, 2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-2, 2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [0, 2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [2, 2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [4, 2, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-4, 4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [-2, 4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [0, 4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [2, 4, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.6, width: 0.6}, state: [4, 4, 0], kinematics: {name: 'static'}}
+  # 四壁（对应 environment.world 的墙：10x0.1 与 0.1x10 的薄盒；linestring 在 ir-sim 里会触发幽灵碰撞，勿用）
+  - {shape: {name: 'rectangle', length: 10.0, width: 0.1}, state: [0, -5, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 10.0, width: 0.1}, state: [0, 5, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.1, width: 10.0}, state: [-5, 0, 0], kinematics: {name: 'static'}}
+  - {shape: {name: 'rectangle', length: 0.1, width: 10.0}, state: [5, 0, 0], kinematics: {name: 'static'}}

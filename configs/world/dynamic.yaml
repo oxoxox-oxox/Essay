@@ -1,0 +1,62 @@
+# Dynamic obstacles (borrowed from NeuPAN dyna_obs): 30x30 arena with 8 rvo
+# dynamic obstacles + 4 static circles; covers dynamic-avoidance training.
+world:
+  height: 30
+  width: 30
+  step_time: 0.3
+  sample_time: 0.3
+  collision_mode: 'stop'
+  control_mode: 'auto'
+
+robot:
+  - kinematics: {name: 'diff'}
+    shape: {name: 'rectangle', length: 0.4, width: 0.3}   # real robot 40cm(front) x 30cm
+    vel_min: [-1.0, -1.0]
+    vel_max: [1.0, 1.0]
+    state: [6, 6, 0]
+    goal: [24, 24, 0]
+    arrive_mode: position
+    goal_threshold: 0.3
+    sensors:
+      - type: 'lidar2d'
+        range_min: 0
+        range_max: 7
+        angle_range: 3.14
+        number: 100
+        noise: True
+        std: 0.08
+        angle_std: 0.1
+        offset: [0.101, 0, 0]   # real lidar mount 10.1cm in front of base center
+        alpha: 0.3
+    plot:
+      show_trajectory: True
+
+obstacle:
+  # dynamic obstacles (random distribution + rvo wander, radius 0.4~1.0)
+  - number: 8
+    distribution: {name: 'random', range_low: [4, 4, -3.14], range_high: [26, 26, 3.14]}
+    kinematics: {name: 'omni'}
+    shape:
+      - {name: 'circle', radius: 0.4}
+      - {name: 'circle', radius: 0.6}
+      - {name: 'circle', radius: 0.8}
+      - {name: 'circle', radius: 1.0}
+    behavior: {name: 'rvo', wander: True, range_low: [4, 4, -3.14], range_high: [26, 26, 3.14],
+               vxmax: 0.3, vymax: 0.3, factor: 1.0}
+    vel_min: [-0.3, -0.3]
+    vel_max: [0.3, 0.3]
+
+  # static circles (manual)
+  - number: 4
+    distribution: {name: 'manual'}
+    shape:
+      - {name: 'circle', radius: 1.0}
+      - {name: 'circle', radius: 0.7}
+    state: [[8, 22], [22, 8], [22, 22], [8, 8]]
+
+  # boundary thin-rectangle walls
+  - number: 4
+    distribution: {name: 'manual'}
+    shape:
+      - {name: 'rectangle', length: 30, width: 0.5}
+    state: [[15, 0.25, 0], [15, 29.75, 0], [0.25, 15, 1.57], [29.75, 15, 1.57]]

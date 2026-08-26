@@ -1,0 +1,7 @@
+action_dim: 2
+activation: tanh
+hidden_sizes:
+- 64
+- 64
+is_discrete: false
+observation_dim: 62

@@ -1,6 +1,6 @@
 """ir-sim 环境封装：把 world YAML 变成 RL 训练/评估可用的接口。
 
-观测 (obs, float32 向量)，输入仿照 DRL-robot-navigation-IR-SIM 的 TD3：
+观测 (obs, float32 向量)，输入仿照 DRL-robot-navigation-IR-SIM 的 prepare_state：
     [lidar 分箱 min 值 / range_max (max_bins,),
      dist / goal_dist_norm, cos, sin,
      上一 chunk 动作归一化 (action_dim*prev_chunk_size,)（可选）]
@@ -8,7 +8,7 @@
     归一化到 [-1,1] 网络输出，内部映射回真实速度范围 [vel_min, vel_max]
     （diff 机器人: [linear_vel, angular_vel]）。
 
-lidar 分箱（对齐 DRL TD3.prepare_state）:
+lidar 分箱（对齐 DRL prepare_state）:
     - bin_size = ceil(lidar_len / max_bins)，每箱取 min 值再 / range_max。
     - max_bins = lidar_len 时 bin_size=1，等价于逐束 / range_max。
 
@@ -59,6 +59,14 @@ class IrSimEnv:
             seed=seed,
         )
 
+        # 覆盖仿真步长（env_cfg.step_time，如 0.0833 对齐 12Hz 真机帧率）。
+        # ir-sim 物理积分用 _world_param.step_time，时钟/显示用 _world.step_time，两处都要改。
+        env_cfg = env_cfg or {}
+        if env_cfg.get("step_time") is not None:
+            st = float(env_cfg["step_time"])
+            self._env._world.step_time = st
+            self._env._world_param.step_time = st
+
         self.display = display
         self.render_interval = float(obs_cfg.get("render_interval", self._env.step_time))
         self.lidar_range_max = float(obs_cfg.get("lidar_range_max", 10.0))
@@ -67,7 +75,6 @@ class IrSimEnv:
         self.goal_dim = int(obs_cfg.get("goal_dim", 2))
         self.max_steps = int(reward_cfg.get("max_steps", 500))
 
-        env_cfg = env_cfg or {}
         self.random_start = bool(env_cfg.get("random_start", False))
         self.start_range_low = np.asarray(
             env_cfg.get("start_range_low", [0.5, 0.5, -3.14]), dtype=float
@@ -140,7 +147,7 @@ class IrSimEnv:
         )[: self.goal_dim]
 
     def _bin_lidar(self, ranges: np.ndarray) -> np.ndarray:
-        """DRL TD3 式 lidar 分箱：每 bin_size 束取 min 值再 / range_max。
+        """DRL 式 lidar 分箱：每 bin_size 束取 min 值再 / range_max。
 
         Args:
             ranges: 原始 lidar ranges（inf 视为 range_max）。

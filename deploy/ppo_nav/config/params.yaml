@@ -1,0 +1,44 @@
+# PPO 部署参数（launch 里 <rosparam command="load"> 到全局命名空间）
+
+planner:
+  goal_x: 5.0            # 目标点 x（odom_combined 系，相对起点）
+  goal_y: 5.0            # 目标点 y
+  # 决策由雷达帧驱动（收到新 /scan 就串行推理一次），不再用固定周期定时器。
+  # min_decision_period: 相邻两次决策的最小间隔（秒），0=纯雷达帧驱动（约 12Hz）。
+  #   训练 step_time=0.083s（1/12），帧驱动即 ≈12Hz，与训练一致，保持 0。
+  min_decision_period: 0.0
+  scan_timeout: 0.5      # scan 超过该时长视为超时 -> 停车
+  debug_log: false
+
+  # ---- 与训练侧对齐（一般不要动）----
+  num_beams: 100         # 训练 lidar 光束数
+  range_max_norm: 7.0    # lidar 归一化量程
+  goal_dist_norm: 10.0   # goal 距离归一化除数（训练 obs.goal_dist_norm）
+  half_fov_deg: 90.0     # 前向半视场
+  reverse_scan: false    # /scan 数组反序开关（现场校验后设置）
+  laser_yaw_fallback_deg: 180.0  # tf 查不到时的兜底 yaw(laser->base_link)
+
+  # ---- action chunking ----
+  # chunk_size: N=1 模型用 1（obs 105）；N=5 模型用 5（obs 113，引擎输出 10 维）。
+  chunk_size: 1
+
+  # ---- 上一动作通道 ----
+  # ⚠️ N=1 模型训练时 prev 恒 0 -> false；N=5 模型用了 prev 通道 -> 必须 true。
+  #    与所用模型严格匹配（见 runs/ablation_runbook.md 第 0 节）。
+  use_prev_action: false
+
+  # ---- 动作映射（μ clip 到 [-1,1] 后按此映射真实速度）----
+  vel_min: [-1.0, -1.0]  # 归一化动作 -> 真实速度 下限 [lin, ang]
+  vel_max: [1.0, 1.0]    # 上限 [lin, ang]（训练值）
+  max_linear: 0.8        # 下发限幅（真机安全上限，建议低速先试 0.3）
+  max_angular: 1.0
+
+safety:
+  stop_dist: 0.35        # 最近障碍 < 此值 -> 急停
+  slow_dist: 0.6         # < 此值 -> 按 slow_factor 减速
+  slow_factor: 0.4
+  min_voltage: 10.5      # 电量低于 -> 停车
+  watchdog_timeout: 0.6  # planner 输出超时 -> 停车
+  max_linear: 0.8
+  max_angular: 1.0
+  front_only: false      # true 时只检查前向±90° 最近距离

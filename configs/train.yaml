@@ -1,17 +1,39 @@
-# TD3（纯全连接，无 CNN）+ INT8 PTQ 训练/导出 总配置
+# PPO 训练总配置（SB3 PPO，ir-sim 环境）
 # 说明：以该文件所在目录为 project root，脚本从仓库根目录运行。
 
 project:
   run_dir: "runs"
   checkpoint_dir: "checkpoints"
-  buffer_dir: "buffers"
-  export_dir: "export"
-  deploy_models_dir: "deploy/td3_nav/models"   # 导出产物自动同步到此，便于整包 scp
 
 # ir-sim 环境（把世界 YAML 放进 configs/world/，这里填文件名即可）
 env:
-  world_name: "configs/world/robot_world.yaml"   # 训练场景
-  eval_world: "configs/world/eval_world.yaml"    # 评估场景（eval 相关代码统一使用）
+  world_name: "configs/world/robot_world.yaml"   # 单世界训练时用（多世界时被 worlds 取代）
+  eval_world: "configs/world/eval_world.yaml"    # 评估场景（评估代码统一使用）
+  # ---- 多世界训练（src/train_ppo.py 每次 reset 随机换世界；每项可覆盖 start_range/fixed_goal）----
+  # 目的：开阔空场 + 稀疏 + 走廊 + 密集 + 动态，修复"空场绕圈"并保持避障能力
+  worlds:
+    - world: "configs/world/robot_world.yaml"     # 原训练世界（10x10 动态杂乱）
+    - world: "configs/world/open_field.yaml"      # 开阔空场（30x30，激光全满量程）
+      start_range_low: [8.0, 8.0, -3.14]
+      start_range_high: [22.0, 22.0, 3.14]
+      fixed_goal: [15.0, 15.0, 0.0]
+    - world: "configs/world/sparse_obs.yaml"      # 稀疏障碍（30x30）
+      start_range_low: [5.0, 5.0, -3.14]
+      start_range_high: [25.0, 25.0, 3.14]
+      fixed_goal: [15.0, 15.0, 0.0]
+    - world: "configs/world/corridor.yaml"        # 走廊（30x30）
+      start_range_low: [4.0, 14.0, -0.5]
+      start_range_high: [8.0, 16.0, 0.5]
+      fixed_goal: [24.0, 15.0, 0.0]
+    - world: "configs/world/cluttered.yaml"       # 密集凸障碍（30x30）
+      start_range_low: [3.0, 3.0, -3.14]
+      start_range_high: [27.0, 27.0, 3.14]
+      fixed_goal: [24.0, 8.0, 0.0]
+    - world: "configs/world/dynamic.yaml"         # 动态障碍（30x30）
+      start_range_low: [5.0, 5.0, -3.14]
+      start_range_high: [25.0, 25.0, 3.14]
+      fixed_goal: [24.0, 24.0, 0.0]
+  step_time: 0.0833        # 仿真步长(s) = 1/12，对齐真机 12Hz 雷达帧率（覆盖世界 YAML 的 0.3）
   display: false
   log_level: "WARNING"
   random_start: true                             # 每个 episode 随机机器人初始位置
@@ -21,12 +43,13 @@ env:
 
 obs:
   lidar_len: 100            # 仅作参考/一致性检查，实际以 env 读到的 beam 数为准
-  lidar_range_max: 7.0     # 归一化用，应与世界 YAML 中 lidar2d.range_max 一致
-  max_bins: 100             # lidar 分箱数（DRL TD3 风格：每 bin_size 束取 min / range_max；=lidar_len 时不降维）
+  lidar_range_max: 7.0      # 归一化用，应与世界 YAML 中 lidar2d.range_max 一致
+  max_bins: 100             # lidar 分箱数（DRL 风格：每 bin_size 束取 min / range_max；=lidar_len 时不降维）
   include_goal: true        # 观测是否拼接 goal 极坐标
   goal_dim: 3               # [dist/goal_dist_norm, cos, sin]
-  goal_dist_norm: 10.0      # goal 距离归一化除数（对齐 DRL TD3 的 distance/10）
-  include_prev_action: true # 观测中编码上一 chunk 动作（每步按 DRL 归一化 [lin*2, (ang+1)/2]），prev_dim=chunk.size*action_dim
+  goal_dist_norm: 10.0      # goal 距离归一化除数（对齐 DRL 的 distance/10）
+  include_prev_action: true # 观测中编码上一动作（每步按 DRL 归一化 [lin*2, (ang+1)/2]），prev_dim=chunk.size*action_dim
+  prev_chunk_size: 1       # 上一动作通道长度（= chunk.size；train_ppo.py 按 --chunk 覆盖）
 
 action:
   action_dim: 2             # [linear_vel, angular_vel]（diff 机器人）
@@ -45,52 +68,17 @@ reward:
   proximity_scale: 0.5         # (threshold - min_laser) 的缩放系数
   ang_penalty_scale: 0.5       # |angular_vel| 惩罚系数
   backward_penalty: 0.0        # 倒退惩罚：原版无，置 0 关闭
-  max_steps: 500               # 单 episode 最大控制步数（决策步=env step）
+  # ---- goal shaping（修复空场绕圈：让"朝目标"本身有奖励）----
+  goal_angle_coef: 0.5         # 朝目标方向奖励系数：+coef*cos(与目标夹角)，朝向+、背对-
+  goal_dist_coef: 1.0          # 靠近目标 shaping：每靠近 1m 得 +coef（potential 式，置 0 关闭）
+  max_steps: 1800              # 单 episode 最大控制步数（83ms/步 × 1800 ≈ 150s，对齐原 0.3s×500）
 
 model:
-  encoder_type: "mlp"      # 纯全连接 TD3（无 CNN，导出 ONNX 全图 GEMM，TRT 可整体降精度、无反复 cast）
-  hidden1: 1024             # MLP 第一层隐藏宽度（路径A：400→1024，MACs 0.17M→1.17M，让 batch≥8 的 INT8 收益可显现）
-  hidden2: 1024             # MLP 第二层隐藏宽度（路径A：300→1024）
-
-td3:
-  actor_lr: 1.0e-4
-  critic_lr: 1.0e-3
-  gamma: 0.99
-  tau: 0.005
-  policy_noise: 0.2         # target 动作平滑噪声（相对动作范围 [-1,1]）
-  noise_clip: 0.5
-  exploration_noise: 0.2    # 训练时 exploration 高斯噪声
-  policy_delay: 2
-  batch_size: 64            # 训练 batch（对齐原版）
-  buffer_size: 500000
-
-train:
-  # 轮次制训练（对齐 compare/train_c.py）：epoch × episode
-  # 注意：N>1 时 episode 很短（策略变好后 ~10 决策步/集），更新比率 = iterations/(train_every_n*平均集长)
-  #   80 次/2 集 ≈ 4 次/步 会导致 Q 值发散（实测 chunk=5 在 ~30 epoch 崩溃）；
-  #   20 次/2 集 虽稳定但早期长 episode 下学习过慢（实测 15.7 万步仍 0% 成功率）；
-  #   400 宽模型取 40 次/2 集稳定；1024 宽容量更大更易发散 → 降到 30（若学习过慢可回 40，需盯 q_value）。
-  #   导出/校准一律用 model_best.pt（峰值）。
-  max_epochs: 60            # 最大 epoch 数（N5 实测 epoch 10 即到 0.9，60 够用）
-  episodes_per_epoch: 70    # 每个 epoch 包含的 episode 数
-  train_every_n: 2          # 每 N 个 episode 训练一次
-  training_iterations: 30   # 每次训练调用的梯度更新次数（1024 宽模型：40 偏险 / 30 保守）
-  max_steps: 200            # 单 episode 最大决策步数
-  eval_episodes: 10         # 每 epoch 评估的 episode 数
-  save_every_epoch: 10      # 每多少 epoch 保存 checkpoint
-  save_buffer: true         # 保存 replay buffer 供 QAT 离线微调
-  parallel_workers: 8       # 并行采样 worker 数（>1 启用多进程并行环境，吞吐量近似线性提升）
-                            # 单 worker 时退化为原单进程训练；命令行 --parallel-workers 可覆盖
+  hidden1: 1024             # SB3 MlpPolicy 第一层隐藏宽度
+  hidden2: 1024             # SB3 MlpPolicy 第二层隐藏宽度
 
 chunk:
-  size: 1                   # action chunking：N。1=无 chunking
+  size: 1                   # action chunking：N。1=无 chunking（PPO 当前为单步 N=1）
 
 eval:
-  episodes: 20
-  episodes_dynamic: 20
-  episodes_visual: 3        # 可视化(  display: false)时只跑几个 episode
-  max_steps: 500
-
-benchmark:
-  iterations: 500
-  warmup: 100
+  max_steps: 1800           # 评估单 episode 步数上限（对齐训练 83ms/步 × 1800）
