@@ -28,6 +28,7 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, sync_envs_normalization
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -150,7 +151,12 @@ class SuccessRateEvalCallback(EvalCallback):
 
 
 def make_env(cfg: dict, world_key: str, seed: int, display: bool = False):
-    """返回一个构建 PPOGymEnv 的工厂（DummyVecEnv 用）。
+    """返回一个构建 PPOGymEnv（外裹 Monitor）的工厂（DummyVecEnv 用）。
+
+    Monitor 用途：
+        1) 消除 evaluate_policy 的 "not wrapped with Monitor" 告警；
+        2) 训练期 TensorBoard 记录 rollout/ep_rew_mean / ep_len_mean。
+    本仓库环境链无任何修改 reward 的 wrapper，Monitor 不改变训练语义。
 
     训练环境（world_key="world_name"）：若配置了 env.worlds 则用多世界包装
     （每次 reset 随机换世界、单活跃场景，规避 ir-sim 全局状态冲突），
@@ -180,7 +186,7 @@ def make_env(cfg: dict, world_key: str, seed: int, display: bool = False):
                 display=display,
                 log_level="CRITICAL",
             )
-        return PPOGymEnv(irsim_env, chunk_size=int(cfg["chunk"].get("size", 1)))
+        return Monitor(PPOGymEnv(irsim_env, chunk_size=int(cfg["chunk"].get("size", 1))))
 
     return _factory
 
