@@ -17,6 +17,10 @@ import argparse
 import os
 import sys
 
+# headless 服务器（Linux 且无 DISPLAY）强制 matplotlib Agg 后端；桌面/Windows 保留 GUI 供 --display 可视化
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+    os.environ.setdefault("MPLBACKEND", "Agg")
+
 import numpy as np
 from stable_baselines3 import PPO
 

@@ -18,6 +18,9 @@ import argparse
 import os
 import sys
 
+# headless 服务器无 GUI：强制 matplotlib Agg 后端（本脚本恒为 headless）
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 import numpy as np
 import torch
 import torch.nn.functional as F

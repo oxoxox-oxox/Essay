@@ -22,6 +22,29 @@ lidar 分箱（对齐 DRL prepare_state）:
 
 from __future__ import annotations
 
+import os
+import sys
+
+# irsim 在 import 时会显式 matplotlib.use("TkAgg"/"Qt5Agg")（irsim.env.env_base 的
+# BACKEND_PREFERENCES），headless 服务器上会打印一堆 "Failed to use ... backend" 告警
+# 后才回退 Agg（MPLBACKEND 环境变量对显式 use() 无效）。这里在 irsim 之前拦截
+# matplotlib.use：GUI 后端加载失败时静默回退 Agg；桌面/Windows 环境 use 成功，行为不变。
+if "matplotlib" not in sys.modules:
+    try:
+        import matplotlib as _mpl
+
+        _real_use = _mpl.use
+
+        def _silent_fallback_use(backend, *args, **kwargs):
+            try:
+                return _real_use(backend, *args, **kwargs)
+            except Exception:
+                return _real_use("Agg", *args, **kwargs)
+
+        _mpl.use = _silent_fallback_use
+    except ImportError:
+        pass
+
 import numpy as np
 import irsim
 from irsim.util.random import rng

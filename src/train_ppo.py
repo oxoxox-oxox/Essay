@@ -20,6 +20,10 @@ import argparse
 import os
 import sys
 
+# headless 服务器无 GUI：强制 matplotlib Agg 后端（避免 TkAgg/Qt5Agg 加载失败告警刷屏）。
+# 训练恒为 headless（display=False），此处无条件设置；若外部已设 MPLBACKEND 环境变量则尊重它。
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
