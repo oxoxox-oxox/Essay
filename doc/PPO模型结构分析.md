@@ -1,6 +1,6 @@
 # PPO 模型结构分析
 
-> 目的（对应 guide.md「下一步」）：分析仓库内已训练 PPO 模型的网络结构，为真机 INT8 量化与 action chunking 做准备。
+> 目的：分析仓库内已训练 PPO 模型的网络结构，为真机 INT8 量化与 action chunking 做准备（对应 README「下一步」）。
 > 所有结构信息均由**实际加载模型**得到（SB3 2.9.0 / torch 2.11.0），复现脚本见 `doc/analyze_ppo_structure.py`，
 > 原始输出见 `doc/ppo_structure_report.txt`。
 

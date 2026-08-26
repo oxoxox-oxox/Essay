@@ -23,7 +23,8 @@
 | PPO → ONNX 导出 | ✅ `export/ppo_mw/`（actor_fp32_bs1/bs8.onnx，opset 17 纯 Gemm/Tanh + calib_obs.npz 校准数据） |
 | PPO 真机导航测试 | ⏳ 未做 |
 | PPO 的 action chunk 效果 | ⏳ 未做 |
-| PPO 的 INT8 量化推理速度 | ✅ 真机 bs1 INT8 延迟 **-47%**（Orin/TRT 8.5，见 `runs/ppo_N1/trt_bench_results.md`）；输出精度对比/导航质量待做 |
+| PPO 的 INT8 量化推理速度 | ✅ 真机 bs1 INT8 延迟 **-47%**（Orin/TRT 8.5，见 `runs/ppo_N1/trt_bench_results.md`）；真机导航质量待做 |
+| PPO 的 INT8 输出精度/碰撞对照（仿真） | ✅ 300 集配对对照（eval_world）：输出 max-abs 0.0087、cos 0.9999；碰撞率 +1%（见 `runs/quant_collision/quant_collision_results.md`） |
 
 冒烟结果（20k 步）：rollout 成功率 0→0.76，最终评估 10 集 60% 成功（σ 未收敛，需完整训练）。
 
@@ -45,7 +46,6 @@
 
 ```
 Essay/
-├─ guide.md             # 当前思路与下一步计划（本仓库的指导文档，优先阅读）
 ├─ configs/             # train.yaml（训练/评估总配置）+ world/ 场景（训练/评估世界 YAML）
 ├─ env/                 # ir-sim 环境封装：wrapper.py（IrSimEnv）、reward.py、ppo_gym.py（SB3 gymnasium 适配）
 ├─ src/                 # train_ppo.py：SB3 PPO 单步训练（多世界）；eval_ppo.py：独立评估
@@ -57,8 +57,12 @@ Essay/
 ├─ doc/                 # 分析文档：PPO 模型结构分析（md + 复现脚本 + 原始输出）
 ├─ runs/                # PPO 训练日志（ppo_*）+ TD3 历史实测记录（*.md，存档供论文参考）
 ├─ 学习笔记_TRT_PTQ量化全流程.md  # ONNX → TensorRT PTQ 全流程学习笔记（通用知识）
+├─ NeuPAN/               # 论文对比基准：第三方端到端 MPC 运动规划器（本地参考，不入库，见下）
 └─ utils/               # config.py：配置加载/深合并/路径解析
 ```
+
+> `NeuPAN/`：论文对比基准——第三方端到端 MPC 运动规划器（[hanruihua/NeuPAN](https://github.com/hanruihua/Neupan)，T-RO 2025），
+> 本地参考副本，**不随 git 跟踪**（`.gitignore` 已排除），不参与本仓库流水线。
 
 ## PPO 训练与评估
 
@@ -137,7 +141,7 @@ python3 build_ptq_engine.py --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --o
 把 ir-sim 世界 YAML 放入 `configs/world/`，修改 `configs/train.yaml` 的 `env.world_name`（训练场景）
 与 `env.eval_world`（评估场景）。要求：机器人带 `lidar2d` 传感器（beam 数与 `obs.lidar_range_max` 一致）、有 `goal`。
 
-## 下一步（见 guide.md）
+## 下一步
 
 1. ~~分析 PPO 模型结构~~ ✅（`doc/PPO模型结构分析.md`）
 2. **真机 INT8 收尾**：锁频复测取中位数、FP32 基线确认 `--noTF32`、**输出精度对比**（INT8 vs FP32 max-abs-diff/余弦）、bs8 吞吐基准；

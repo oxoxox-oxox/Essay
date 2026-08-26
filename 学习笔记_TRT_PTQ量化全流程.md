@@ -1,7 +1,8 @@
 # TensorRT PTQ 量化全流程 · 学习笔记
 
 > 本笔记把「在 PC 上验证 ONNX → TensorRT INT8 PTQ 量化可行性」这一整套工作完整拆解，目标是让你**只看这一份就能复现 + 理解**。
-> 配套仓库：本目录下的 `deploy/td3_nav/models/build_ptq_engine.py`（板上建引擎脚本）、`train/export_onnx.py`（导出 ONNX）。
+> 配套仓库（当前版本）：`export/ppo_mw/build_ptq_engine.py`（板上建 INT8 引擎脚本）、`train/export_ppo_onnx.py`（导出 ONNX）。
+> 本笔记最初随已移除的 TD3 流水线编写（当时配套 `deploy/td3_nav/`、`train/export_onnx.py`），脚本位置已更新为 PPO 版。
 > 实测环境：Windows + conda env `cuda` + TensorRT 10.10.0.31 + CUDA Toolkit 12.8 + RTX 5070（Blackwell sm_120）。
 
 ---
@@ -497,7 +498,7 @@ squeeze_after_/Tanh + /Reshape
 
 ## 11. 继续学习路径
 
-1. **动手跑一遍**：把 `deploy/td3_nav/models/build_ptq_engine.py` 在 PC 上跑通，逐行改、看报错。
+1. **动手跑一遍**：把 `export/ppo_mw/build_ptq_engine.py` 在 PC 上跑通，逐行改、看报错。
 2. **读官方文档**：NVIDIA TensorRT Developer Guide 的 "Working with INT8" 章节（校准器/scale 的权威来源）。
 3. **看懂 Engine Inspector**：用 `7.4 的代码打印你自己的引擎，读懂"融合"和"Reformat cast"。
 4. **补 CUDA 基础**：host/device 内存、`cudaMemcpy`、kernel launch 开销——理解 launch-bound 的前提。

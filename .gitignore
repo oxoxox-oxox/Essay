@@ -24,6 +24,9 @@ wheels/
 .venv/
 venv/
 ENV/
+# 注意：gitignore 不支持行尾注释；下面这行必须单独成行。
+# Windows 大小写不敏感：ENV/ 会误忽略本项目 env/ 源码目录（env/ppo_gym.py 等），用 !env/ 重新包含。
+!env/
 *.env
 
 # IDE
@@ -50,6 +53,8 @@ Thumbs.db
 checkpoints/
 runs/*
 !runs/*.md
+!runs/quant_collision/
+!runs/quant_collision/*.md
 export/
 buffers/
 logs/
