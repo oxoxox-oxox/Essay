@@ -185,7 +185,10 @@ def main() -> None:
         cfg = load_config(resolve_path(args.train_yaml))
         chunk_size = args.chunk if args.chunk is not None else (act_dim // 2)
         # 与训练/评估一致：obs 上一动作通道长度 = chunk_size
-        cfg = deep_update(cfg, {"obs": {"prev_chunk_size": chunk_size},
+        # 校准数据是 ACTOR 的输入分布，必须强制 include_global=False：
+        # actor 网络只吃局部 105 维（方向2 时环境 obs 会多出 6 维全局特征，须切掉）
+        cfg = deep_update(cfg, {"obs": {"prev_chunk_size": chunk_size,
+                                        "include_global": False},
                                 "chunk": {"size": chunk_size}})
         world_key = "eval_world" if args.calib_world else "world_name"
         if args.calib_world:

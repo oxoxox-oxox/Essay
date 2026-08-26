@@ -26,6 +26,7 @@ from stable_baselines3 import PPO
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from env.policy import GlobalCriticActorCriticPolicy  # noqa: E402,F401  # 让 PPO.load 能反序列化自定义 policy_class
 from env.wrapper import IrSimEnv  # noqa: E402
 from utils.config import load_config, resolve_path  # noqa: E402
 
@@ -206,6 +207,9 @@ def main() -> None:
 
     cfg = load_config(resolve_path(args.config))
     cfg["obs"]["prev_chunk_size"] = 1
+    # 量化对照比较的是 ACTOR（部署侧只推理 actor，输入恒为局部 105 维）。
+    # 方向2 checkpoint 的 env obs 会多出 6 维全局特征（仅训练期给 critic 用），这里强制关掉。
+    cfg["obs"]["include_global"] = False
 
     # ---- 加载模型 + 校准量化 ----
     model = PPO.load(resolve_path(args.checkpoint), device="cpu")
@@ -215,10 +219,18 @@ def main() -> None:
     actor = QuantActor(pol.mlp_extractor.policy_net, pol.action_net, calib_obs)
 
     # 自检：我的 fp32 前向 == SB3 predict（确定性 μ 应 clip 后一致）
+    # 方向2 时 model.predict 需要完整 obs（局部+全局），全局维用 0 填充（不影响 actor 前向）
+    local_dim = int(getattr(pol, "local_obs_dim", model.observation_space.shape[0]))
+    global_dim = int(model.observation_space.shape[0]) - local_dim
+    x_check = calib_obs[:8]
+    if global_dim > 0:
+        x_check = np.concatenate(
+            [x_check, np.zeros((x_check.shape[0], global_dim), dtype=np.float32)], axis=1
+        )
     with torch.no_grad():
         x = torch.from_numpy(calib_obs[:8]).float()
         mine = actor.fp32(x).numpy()
-    sb3_pred, _ = model.predict(calib_obs[:8], deterministic=True)
+    sb3_pred, _ = model.predict(x_check, deterministic=True)
     fp32_check = float(np.abs(np.clip(mine, -1, 1) - sb3_pred).max())
     print(f"[check] fp32 forward vs SB3 predict max-abs-diff = {fp32_check:.3e}")
 

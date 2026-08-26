@@ -50,6 +50,12 @@ obs:
   goal_dist_norm: 10.0      # goal 距离归一化除数（对齐 DRL 的 distance/10）
   include_prev_action: true # 观测中编码上一动作（每步按 DRL 归一化 [lin*2, (ang+1)/2]），prev_dim=chunk.size*action_dim
   prev_chunk_size: 1       # 上一动作通道长度（= chunk.size；train_ppo.py 按 --chunk 覆盖）
+  # ---- 方向2：Critic 独享全局特征（actor 保持局部观测）----
+  # include_global=true 时 obs 追加 6 维全局特征 [x/s, y/s, sinθ, cosθ, gx/s, gy/s]，
+  # 由 env/policy.GlobalCriticActorCriticPolicy 切分：actor 只取前 105 维，critic 取全量。
+  # 训练时用 train_ppo.py --critic-global 开启（会同时启用该自定义策略）。
+  include_global: false
+  global_scale: 30.0       # 绝对坐标归一化除数（x,y,gx,gy 除以它，对齐 30x30 世界）
 
 action:
   action_dim: 2             # [linear_vel, angular_vel]（diff 机器人）
