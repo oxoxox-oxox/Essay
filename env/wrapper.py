@@ -3,8 +3,7 @@
 观测 (obs, float32 向量)，输入仿照 DRL-robot-navigation-IR-SIM 的 prepare_state：
     [lidar 分箱 min 值 / range_max (max_bins,),
      dist / goal_dist_norm, cos, sin,
-     上一 chunk 动作归一化 (action_dim*prev_chunk_size,)（可选）,
-     全局特征 (global_dim,)（可选；obs.include_global=True 时追加，给 Critic 用）]
+     上一 chunk 动作归一化 (action_dim*prev_chunk_size,)（可选）]
 动作 (numpy, (action_dim,)):
     归一化到 [-1,1] 网络输出，内部映射回真实速度范围 [vel_min, vel_max]
     （diff 机器人: [linear_vel, angular_vel]）。
@@ -119,12 +118,6 @@ class IrSimEnv:
         )
         self._prev_chunk = np.zeros(self.prev_action_dim, dtype=np.float32)
 
-        # 全局特征（方向2：仅追加给 Critic；actor 由 GlobalCriticActorCriticPolicy 切掉尾部）
-        # 维度固定 6：[x/scale, y/scale, sin(theta), cos(theta), gx/scale, gy/scale]
-        self.include_global = bool(obs_cfg.get("include_global", False))
-        self.global_scale = float(obs_cfg.get("global_scale", 30.0))
-        self.global_dim = 6 if self.include_global else 0
-
         self.reward_fn = RewardFn(reward_cfg)
         self.step_time = float(self._env.step_time)
 
@@ -133,7 +126,7 @@ class IrSimEnv:
 
         self.max_bins = int(obs_cfg.get("max_bins", self.lidar_len))
         self.obs_dim = (
-            self.max_bins + (self.goal_dim if self.include_goal else 0) + self.prev_action_dim + self.global_dim
+            self.max_bins + (self.goal_dim if self.include_goal else 0) + self.prev_action_dim
         )
         self.step_count = 0
         self._prev_dist: float | None = None
@@ -197,24 +190,6 @@ class IrSimEnv:
             min_values.append(self.lidar_range_max)
         return (np.asarray(min_values, dtype=np.float32) / self.lidar_range_max)[: self.max_bins]
 
-    def _global_obs(self) -> np.ndarray:
-        """全局特征（绝对位姿 + 绝对目标，归一化到约 [0,1]/[-1,1]）。
-
-        仅追加给 Critic（GlobalCriticActorCriticPolicy 切掉 actor 不用的尾段）；
-        维度固定 6：[x/scale, y/scale, sin(theta), cos(theta), gx/scale, gy/scale]。
-        """
-        state = np.squeeze(np.asarray(self._env.get_robot_state(), dtype=np.float64))
-        goal = np.squeeze(np.asarray(self.robot.goal, dtype=np.float64))
-        s = self.global_scale
-        return np.array(
-            [
-                state[0] / s, state[1] / s,
-                np.sin(state[2]), np.cos(state[2]),
-                goal[0] / s, goal[1] / s,
-            ],
-            dtype=np.float32,
-        )
-
     def _get_obs(self) -> np.ndarray:
         ranges = np.asarray(self._env.get_lidar_scan()["ranges"], dtype=np.float64)
         obs = [self._bin_lidar(ranges)]
@@ -222,8 +197,6 @@ class IrSimEnv:
             obs.append(self._goal_obs())
         if self.include_prev_action:
             obs.append(self._prev_chunk)
-        if self.include_global:
-            obs.append(self._global_obs())
         return np.concatenate(obs).astype(np.float32)
 
     def _set_prev_chunk(self, executed: np.ndarray) -> None:

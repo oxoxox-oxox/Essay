@@ -26,7 +26,6 @@ from stable_baselines3 import PPO
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from env.policy import GlobalCriticActorCriticPolicy  # noqa: E402,F401  # 让 PPO.load 能反序列化自定义 policy_class
 from env.wrapper import IrSimEnv  # noqa: E402
 from utils.config import deep_update, load_config, resolve_path  # noqa: E402
 
@@ -103,17 +102,7 @@ def main() -> None:
     chunk_size = int(model.action_space.shape[0]) // 2
     cfg = deep_update(cfg, {"obs": {"prev_chunk_size": chunk_size},
                             "chunk": {"size": chunk_size}})
-    # 按模型的 obs 空间自动同步 include_global（方向2 checkpoint 的 obs 比局部观测多 global_dim 维）
-    obs_cfg = cfg["obs"]
-    local_base = (
-        int(obs_cfg.get("max_bins", 100))
-        + (int(obs_cfg.get("goal_dim", 2)) if obs_cfg.get("include_goal", True) else 0)
-        + (int(obs_cfg.get("action_dim", 2)) * chunk_size if obs_cfg.get("include_prev_action", False) else 0)
-    )
-    model_obs_dim = int(model.observation_space.shape[0])
-    cfg = deep_update(cfg, {"obs": {"include_global": bool(model_obs_dim > local_base)}})
-    print(f"[eval] loaded {args.checkpoint} (device={args.device}, chunk={chunk_size}, "
-          f"obs={model_obs_dim}, include_global={cfg['obs']['include_global']})")
+    print(f"[eval] loaded {args.checkpoint} (device={args.device}, chunk={chunk_size})")
     metrics = final_eval(model, cfg, args.episodes, args.seed, args.display,
                          int(cfg["eval"].get("max_steps", 500)), chunk_size)
     print(f"[eval] success={metrics['success_rate']:.2%} "

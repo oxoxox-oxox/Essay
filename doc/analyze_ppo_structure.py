@@ -13,8 +13,6 @@ import torch
 from stable_baselines3 import PPO
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO_ROOT)
-from env.policy import GlobalCriticActorCriticPolicy  # noqa: E402,F401  # 让 PPO.load 能反序列化自定义 policy_class
 REPORT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ppo_structure_report.txt")
 
 MODELS = [

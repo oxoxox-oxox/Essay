@@ -34,7 +34,6 @@ from stable_baselines3.common.vec_env import DummyVecEnv, sync_envs_normalizatio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from env.multi_world import MultiWorldIrSimEnv  # noqa: E402
-from env.policy import GlobalCriticActorCriticPolicy  # noqa: E402
 from env.ppo_gym import PPOGymEnv  # noqa: E402
 from env.wrapper import IrSimEnv  # noqa: E402
 from utils.config import deep_update, load_config, resolve_path  # noqa: E402
@@ -213,17 +212,12 @@ def main() -> None:
                     help="PPO 熵正则系数（默认 0.0；熵坍缩时试 0.01）")
     ap.add_argument("--n-steps", type=int, default=1024,
                     help="PPO rollout 步数（默认 1024；83ms 步长下建议 4096 覆盖更多集）")
-    ap.add_argument("--critic-global", action="store_true",
-                    help="方向2：给 Critic 追加全局特征（绝对位姿+绝对目标，obs 尾部 6 维），"
-                         "actor 保持局部观测（输入仍为 105 维，导出/部署链路不变）")
     args = ap.parse_args()
 
     cfg = load_config(resolve_path(args.config))
     # action chunk 长度 N：网络动作空间 = N*action_dim；obs 上一动作通道 = N*action_dim
     chunk_size = args.chunk if args.chunk is not None else int(cfg["chunk"].get("size", 1))
     cfg = deep_update(cfg, {"obs": {"prev_chunk_size": chunk_size}, "chunk": {"size": chunk_size}})
-    if args.critic_global:
-        cfg = deep_update(cfg, {"obs": {"include_global": True}})
     if args.worlds:
         # --worlds 覆盖 config 的 env.worlds（多世界训练）
         cfg = deep_update(cfg, {"env": {"worlds": [w.strip() for w in args.worlds.split(",")]}})
@@ -240,15 +234,6 @@ def main() -> None:
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(run_dir, exist_ok=True)
 
-    # 方向2：局部/全局 obs 维数（与 env/wrapper.IrSimEnv 的 obs_dim 计算保持一致）
-    obs_cfg = cfg["obs"]
-    local_obs_dim = (
-        int(obs_cfg.get("max_bins", 100))
-        + (int(obs_cfg.get("goal_dim", 2)) if obs_cfg.get("include_goal", True) else 0)
-        + (int(obs_cfg.get("action_dim", 2)) * chunk_size if obs_cfg.get("include_prev_action", False) else 0)
-    )
-    global_dim = 6 if obs_cfg.get("include_global", False) else 0
-
     train_env = DummyVecEnv([make_env(cfg, "world_name", args.seed)])
     eval_env = DummyVecEnv([make_env(cfg, "eval_world", args.seed + 1000)])
 
@@ -262,21 +247,10 @@ def main() -> None:
         verbose=1,
     )
 
-    policy_cls: str | type = "MlpPolicy"
-    policy_kwargs: dict = {"net_arch": [h1, h2]}
-    if global_dim > 0:
-        # 方向2：Critic 独享全局特征；actor 输入仍为 local_obs_dim
-        policy_cls = GlobalCriticActorCriticPolicy
-        policy_kwargs["local_obs_dim"] = local_obs_dim
-        assert train_env.observation_space.shape[0] == local_obs_dim + global_dim, (
-            f"obs 维度不一致: env={train_env.observation_space.shape[0]} "
-            f"local+global={local_obs_dim}+{global_dim}"
-        )
-
     model = PPO(
-        policy_cls,
+        "MlpPolicy",
         train_env,
-        policy_kwargs=policy_kwargs,
+        policy_kwargs={"net_arch": [h1, h2]},
         learning_rate=3e-4,
         n_steps=args.n_steps,
         batch_size=128,
@@ -293,9 +267,7 @@ def main() -> None:
         verbose=1,
     )
     print(f"[ppo] tag={tag} obs_dim={train_env.observation_space.shape} "
-          f"(local={local_obs_dim}, global={global_dim}) "
           f"act_dim={train_env.action_space.shape} net=[{h1},{h2}] "
-          f"policy={getattr(model.policy_class, '__name__', model.policy_class)} "
           f"steps={args.steps} device={args.device}")
 
     model.learn(total_timesteps=args.steps, callback=eval_callback)

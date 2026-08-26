@@ -46,16 +46,13 @@ def main() -> None:
     }
     log_std = getattr(getattr(pol, "action_dist", None), "log_std", None)
 
-    # Actor 输入维度：方向2（GlobalCriticActorCriticPolicy）时 observation_space 含全局
-    # 特征，但 actor 网络只吃 local_obs_dim 维（policy.local_obs_dim），解包/导出必须用后者。
-    obs_dim = int(getattr(pol, "local_obs_dim", pol.observation_space.shape[0]))
+    obs_dim = int(pol.observation_space.shape[0])
     act_dim = int(getattr(pol.action_space, "shape", [None])[0])
     hidden = [
         m.out_features
         for m in pol.mlp_extractor.policy_net
         if isinstance(m, torch.nn.Linear)
     ]
-    critic_global = int(getattr(pol, "global_obs_dim", 0))
     config = {
         "observation_dim": obs_dim,
         "action_dim": act_dim,
@@ -66,7 +63,6 @@ def main() -> None:
         if isinstance(pol.net_arch, list)
         else pol.net_arch,
         "source_checkpoint": args.checkpoint,
-        "critic_global": critic_global,  # >0 表示方向2：critic 额外输入 global_dim 维全局特征
         "obs_contract": "105 = lidar100(分箱min/range_max) + goal3(dist/10,cos,sin) + prev_action2(lin*2,(ang+1)/2)",
     }
 
@@ -83,8 +79,7 @@ def main() -> None:
     n_params = int(sum(v.numel() for v in actor_sd.values()))
     print(f"[unpack] {args.checkpoint}")
     print(f"[unpack] obs_dim={obs_dim} act_dim={act_dim} hidden={hidden} "
-          f"critic_global={critic_global} actor_params={n_params} "
-          f"(含 log_std {log_std.numel() if log_std is not None else 0})")
+          f"actor_params={n_params} (含 log_std {log_std.numel() if log_std is not None else 0})")
     print(f"[unpack] saved: {pt_path}")
     print(f"[unpack] saved: {cfg_path}")
     print(f"[unpack] 下一步: d:/anaconda/envs/ir-sim/python.exe "
