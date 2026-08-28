@@ -1,152 +1,138 @@
-# PPO 端到端导航模型：INT8 量化 + Action Chunking 加速研究（ir-sim 导航环境）
+# PPO End-to-End Navigation: INT8 Quantization × Action Chunking (N=5) — A Production-Ready Robot Deployment Repository
 
-论文方向：机器人端到端 RL 导航因推理耗时产生决策延时。提出两种正交手段：
-
-- **INT8 量化**：把模型量化成 INT8，提升推理速度、降低单步决策延时；
-- **action chunking**：一次推理输出 N 步、开环执行，降低推理频率、防止碰撞。
-
-> 当前算法基线为 **SB3 PPO**（单步 N=1）。TD3 路线经实测确认不可行（训练不稳定、效果差），
-> 相关代码与产物已从仓库移除；历史实测数据保留在 `runs/trt_bench_results.md`、
-> `runs/latency_diagnosis_results.md`，供论文对比参考。
+> Combines **INT8 quantization** and **action chunking (N=5)**.
+> Core deliverables: the `deploy/ppo_nav/` ROS deployment package + `export/` artifacts + the `runs/ablation_runbook.md` on-robot workflow.
 
 ---
 
-## 当前状态（2026-08）
+## Project Positioning
 
-| 项 | 状态 |
+- **Problem being solved**: PPO end-to-end RL navigation inference latency → decision latency. Two orthogonal levers reduce single-step decision latency:
+  - **INT8 quantization**: ONNX → TensorRT PTQ, real-robot bs1 inference latency **-33%** (Orin/TRT 8.5, measured in `runs/trt_bench_results.md`);
+  - **action chunking (N=5)**: one inference emits 5 steps executed open-loop, cutting inference frequency to 1/5 and preventing collisions.
+- **Main experiment**: navigation with **N=5 + INT8 quantization both active** (compared against: N=5/FP32, N=1/INT8, N=1/FP32, see the 4-cell ablation matrix).
+
+> ⚠️ The current algorithm is **PPO** (MlpPolicy 1024×1024).
+
+---
+
+## Current Status (2026-08)
+
+| Item | Status |
 | --- | --- |
-| TD3 基线 | ❌ 已放弃（代码/模型/产物已清理） |
-| PPO 训练（ir-sim） | ✅ **当前主模型 `checkpoints/ppo_mw_N1/`**（多世界重训 v2）；旧版 `ppo_N1/`、`ppo_smoke_N1/` 保留 |
-| PPO 仿真评估 | ✅ `src/eval_ppo.py --checkpoint ...`（成功率/碰撞率/平均步数） |
-| PPO 多世界重训（v2） | ✅ `checkpoints/ppo_mw_N1/`（6 世界 + goal shaping；**空场绕圈已修复**：直行 3m 到达、max\|yaw\| 0.05rad） |
-| PPO 策略演示（ir-sim） | ✅ `demos/ppo_irsim_demo.py`（Gazebo 训练策略的 ir-sim 演示，模型在 `demos/data/`，实测 20/20 成功、0 碰撞、平均 105 步） |
-| PPO → ONNX 导出 | ✅ `export/ppo_mw/`（actor_fp32_bs1/bs8.onnx，opset 17 纯 Gemm/Tanh + calib_obs.npz 校准数据） |
-| PPO 真机导航测试 | ⏳ 未做 |
-| PPO 的 action chunk 效果 | ⏳ 未做 |
-| PPO 的 INT8 量化推理速度 | ✅ 真机 bs1 INT8 延迟 **-47%**（Orin/TRT 8.5，见 `runs/ppo_N1/trt_bench_results.md`）；真机导航质量待做 |
-| PPO 的 INT8 输出精度/碰撞对照（仿真） | ✅ 300 集配对对照（eval_world）：输出 max-abs 0.0087、cos 0.9999；碰撞率 +1%（见 `runs/quant_collision/quant_collision_results.md`） |
-
-冒烟结果（20k 步）：rollout 成功率 0→0.76，最终评估 10 集 60% 成功（σ 未收敛，需完整训练）。
+| PPO training (N=1 / N=5, ir-sim, 83ms step) | ✅ `checkpoints/ppo_final_N1/`, `checkpoints/ppo_final_N5/` |
+| PPO simulation evaluation (success/collision rates) | ✅ `src/eval_ppo.py --checkpoint ...` |
+| PPO → ONNX export (pure Gemm/Tanh, opset 17) | ✅ `onnx/export_ppo_onnx.py` (N=1→105 dim / N=5→113 dim) |
+| INT8 real-robot inference speed | ✅ Real-robot bs1 INT8 **-33%** (Orin/TRT 8.5, see `runs/trt_bench_results.md`) |
+| INT8 output accuracy / collision comparison (sim) | ✅ 300 paired episodes: max-abs 0.0087, collision rate +1% (`runs/quant_collision/`) |
 
 ---
 
-## 环境要求
+## Environment Requirements
 
-**PC（训练 / 评估 / 演示）**
+**PC (training / evaluation / export)**
 
-- Python >= 3.10，conda env `rl_env`（已装 stable-baselines3 2.9.0 / gymnasium 1.3.0 / irsim 2.10.0）
-- 或 `pip install -r requirements.txt`（含 stable-baselines3、gymnasium）
+- Python >= 3.10, conda env:
+- `pip install -r requirements.txt`
 
-**机器人（部署）**
+**Robot (deployment)**
 
-- ROS1 Noetic + Jetson Orin Nano（JetPack R35.6.1，TensorRT 8.5，CUDA）
-- 部署包：`deploy/ppo_nav/`（PPO 契约重建版，见 `deploy/README.md`）
+- ROS1 Noetic + Jetson Orin Nano (JetPack R35.6.1, TensorRT 8.5, CUDA)
+- Deployment package: `deploy/ppo_nav/` (see `deploy/README.md`)
 
-## 目录结构
+## Directory Structure
 
 ```
 Essay/
-├─ configs/             # train.yaml（训练/评估总配置）+ world/ 场景（训练/评估世界 YAML）
-├─ env/                 # ir-sim 环境封装：wrapper.py（IrSimEnv）、reward.py、ppo_gym.py（SB3 gymnasium 适配）
-├─ src/                 # train_ppo.py：SB3 PPO 单步训练（多世界）；eval_ppo.py：独立评估
-├─ train/               # unpack_ppo_actor.py / export_ppo_onnx.py（ONNX 导出两步）
-├─ demos/               # PPO 策略的 ir-sim 演示（纯 torch 前向，模型文件在 demos/data/）
-├─ deploy/              # 真机部署：ppo_nav ROS 包（planner/safety/obs/TRT 封装）+ 部署文档
-├─ checkpoints/         # PPO 模型：当前 ppo_mw_N1/{best_model,ppo_model}.zip；旧 ppo_N1/、ppo_smoke_N1/
-├─ export/              # ONNX 导出产物：ppo_mw/（当前）与 ppo_N1/（历史）
-├─ doc/                 # 分析文档：PPO 模型结构分析（md + 复现脚本 + 原始输出）
-├─ runs/                # PPO 训练日志（ppo_*）+ TD3 历史实测记录（*.md，存档供论文参考）
-├─ 学习笔记_TRT_PTQ量化全流程.md  # ONNX → TensorRT PTQ 全流程学习笔记（通用知识）
-├─ NeuPAN/               # 论文对比基准：第三方端到端 MPC 运动规划器（本地参考，不入库，见下）
-└─ utils/               # config.py：配置加载/深合并/路径解析
+├─ configs/             # train.yaml (master training/eval config) + world/ scenarios (training/eval world YAML)
+├─ env/                 # ir-sim env wrappers: wrapper.py (IrSimEnv), reward.py, ppo_gym.py, multi_world.py
+├─ src/                 # train_ppo.py: SB3 PPO training (N=1/N=5 selectable); eval_ppo.py: standalone eval
+├─ onnx/                # unpack_ppo_actor.py / export_ppo_onnx.py (two-step ONNX export) / export_ablation.ps1
+├─ deploy/              # real-robot deployment: ppo_nav ROS package (planner/safety/obs/TRT wrappers) + scripts/build_ptq_engine.py + README
+├─ checkpoints/         # PPO models: ppo_final_N1/, ppo_final_N5/
+├─ export/              # ONNX export artifacts (ppo_final_N1/, ppo_final_N5/: actor_fp32_bs1.onnx + calib_obs.npz)
+├─ doc/                 # PPO model structure analysis (md + reproduction script + raw output)
+├─ runs/                # training logs (ppo_*) + on-robot runbook + TRT measured records
+└─ utils/               # config.py: config loading / deep merge / path resolution
 ```
 
-> `NeuPAN/`：论文对比基准——第三方端到端 MPC 运动规划器（[hanruihua/NeuPAN](https://github.com/hanruihua/Neupan)，T-RO 2025），
-> 本地参考副本，**不随 git 跟踪**（`.gitignore` 已排除），不参与本仓库流水线。
+## Quick Start: Train → Export → Quantize → Deploy
 
-## PPO 训练与评估
-
-模型：SB3 PPO（MlpPolicy，隐藏层 1024×1024，由 `configs/train.yaml` 的 `model.hidden1/2` 控制）。
-观测 105 维（100 lidar + goal 3 + 上一动作 2），动作 2 维连续速度（归一化 [-1,1]，
-由 `IrSimEnv.scale_action` 映射到真实速度）。
+### 1) Training (N=1 and N=5)
 
 ```bash
-# 完整训练（GPU，多世界）：产物 checkpoints/{name}_N1/{best_model,ppo_model}.zip + runs/{name}_N1/
-d:\anaconda\envs\rl_env\python.exe src\train_ppo.py --steps 300000 --device cuda --name ppo_mw
-# 冒烟测试（CPU，几分钟）
-d:\anaconda\envs\rl_env\python.exe src\train_ppo.py --steps 20000 --device cpu --name ppo_mw_smoke
-# 指定世界列表（覆盖 config 的 env.worlds；不传则用 config）
-d:\anaconda\envs\rl_env\python.exe src\train_ppo.py --steps 300000 --device cuda --worlds configs/world/open_field.yaml,configs/world/sparse_obs.yaml
-# 评估（独立脚本 src/eval_ppo.py，无头 20 集）
-d:\anaconda\envs\rl_env\python.exe src\eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip
-# 评估+可视化（弹 matplotlib 窗口）
-d:\anaconda\envs\rl_env\python.exe src\eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip --episodes 3 --display
-# 换评估世界（默认 eval_world；如要评估训练世界 robot_world.yaml 用 --world）
-d:\anaconda\envs\rl_env\python.exe src\eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip --world configs/world/robot_world.yaml
+# Full training (GPU, multi-world; chunk=1 outputs checkpoints/ppo_final_N1/, chunk=5 outputs ppo_final_N5/)
+python src\train_ppo.py --steps 300000 --device cuda --name ppo_final --chunk 1 --ent-coef 0.01 --n-steps 4096
+python src\train_ppo.py --steps 300000 --device cuda --name ppo_final --chunk 5 --ent-coef 0.01 --n-steps 4096
 ```
 
-训练用 `configs/train.yaml` 的 env/obs/reward 段。**多世界训练**（默认开启，`env.worlds` 列表）：
-每次 reset 随机换一个世界（单活跃场景，规避 ir-sim 多实例冲突），世界包括
-`robot_world`（动态杂乱）、`open_field`（空场，修复绕圈）、`sparse_obs`、`corridor`、`cluttered`、`dynamic`；
-每项可覆盖 start_range/fixed_goal。reward 已加 **goal shaping**（`goal_angle_coef`/`goal_dist_coef`）。
-详细用法见脚本 docstring。
+> Entropy-collapse guard: at the 83ms step size use `n_steps 4096` + `ent_coef 0.01`; export from `best_model.zip` (saved by eval success rate), not `ppo_model.zip`.
 
-## PPO → ONNX 导出与真机 INT8 准备
-
-模型导出分两步（SB3 与 onnx 分属不同 conda env，无法在单 env 内同时满足）：
+### 2) Evaluation (optional, simulation validation)
 
 ```bash
-# ① 解包 Actor 权重（rl_env，有 SB3；默认取当前主模型 ppo_mw）
-d:\anaconda\envs\rl_env\python.exe train\unpack_ppo_actor.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip --name ppo_mw
-# ② 导出 ONNX + 采集 INT8 校准数据（ir-sim env，有 onnx；默认 batch 1,8）
-d:\anaconda\envs\ir-sim\python.exe train\export_ppo_onnx.py --actor export/ppo_mw/policy_actor.pt --make-calib
+python src\eval_ppo.py --checkpoint checkpoints/ppo_final_N1/best_model.zip
 ```
 
-产物（`export/ppo_mw/`）：
-
-- `actor_fp32_bs1.onnx` / `actor_fp32_bs8.onnx`：纯 FP32 图（**仅 Gemm/Tanh，opset 17**），输入 `obs [B,105]`，输出 `action [B,2]`（μ，机器人侧需 `clip` 到 [-1,1] 再映射速度）
-- `calib_obs.npz`：256 条真实 obs（策略在训练世界 rollout 采集），INT8 PTQ 校准用
-- `build_ptq_engine.py`：板上建 INT8 引擎脚本（真实数据校准）
-- bs1 = ROS 实时单步推理；bs8 = 板上吞吐基准（**勿**把 bs8 引擎用于导航）
-
-**板上量化（Jetson Orin Nano / TRT 8.5，目标机操作）**：
+### 3) Export ONNX + collect calibration data (two steps, two separate conda envs)
 
 ```bash
-scp -r export/ppo_mw/ wheeltec@<ip>:~/ppo_deploy/
-cd ~/ppo_deploy
-# FP32 基线（导航，batch=1，--noTF32 才是真 FP32）
-/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs1.onnx --noTF32 --saveEngine=actor_fp32.engine
-# INT8 真实数据校准（导航引擎必须 --batch-size 1，漏写会产出 bs8 引擎）
-python3 build_ptq_engine.py --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --out actor_int8.engine --batch-size 1
-# 吞吐基准（batch=8，可选）：trtexec --int8 是随机校准，只能测速
-/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs8.onnx --int8 --saveEngine=actor_int8_bs8.engine
+# ① Unpack Actor (rl_env) → export/ppo_final_N1/, export/ppo_final_N5/
+python onnx\unpack_ppo_actor.py --checkpoint checkpoints/ppo_final_N1/best_model.zip --name ppo_final_N1
+python onnx\unpack_ppo_actor.py --checkpoint checkpoints/ppo_final_N5/best_model.zip --name ppo_final_N5
+# ② Export ONNX + INT8 calibration data (ir-sim env)
+python onnx\export_ppo_onnx.py --actor export/ppo_final_N1/policy_actor.pt --make-calib
+python onnx\export_ppo_onnx.py --actor export/ppo_final_N5/policy_actor.pt --make-calib --chunk 5
 ```
 
-> `.engine` 与 TRT 版本 + GPU 架构绑定，必须在板子上构建。
-> 动作输出为 μ（squash_output=False），板上 obs 构造需按 105 维契约（lidar 分箱/range_max、goal [dist/10,cos,sin]、上一动作 [lin*2,(ang+1)/2]）实现。
+Artifacts (`export/ppo_final_N{1,5}/`): `actor_fp32_bs1/bs8.onnx` (pure Gemm/Tanh), `calib_obs.npz` (real-obs calibration set), `policy_actor.pt`, `actor_config.yaml`.
+One-shot script: `onnx/export_ablation.ps1`.
 
-## 观测 / 动作契约（env/wrapper.py 的 IrSimEnv）
+### 4) Build engines on board (FP32 baseline + INT8 quantization; batch=1!)
 
-- 观测（仿 DRL-robot-navigation-IR-SIM 的 prepare_state）：
-  - lidar：分箱取 min 再 / range_max（`obs.max_bins`，默认 = lidar 束数）
-  - goal 极坐标：`[dist / goal_dist_norm, cos, sin]`（3 维，`goal_dist_norm` 默认 10）
-  - 上一动作（`obs.include_prev_action: true`）：`N*action_dim` 维，逐维归一化每步 `[lin*2, (ang+1)/2]`
-    ⚠️ 当前 PPO 模型训练走 `step_single`，该通道**恒为 0**（已实测验证），部署端 obs_builder 默认输出 0 保持一致
-- 动作：归一化 `[-1,1]`，映射到真实速度范围（diff 机器人 `[linear_vel, angular_vel]`）
-- 奖励：到达+100 / 碰撞-100 / 每步 `lin - 0.5|ang|` / 贴近惩罚 / **+0.5·cos(目标夹角) + 1.0·每米靠近（goal shaping，修复空场绕圈）**
-- 终止：到达 / 碰撞 / 超时（`max_steps`）
+```bash
+scp -r export/ppo_final_N1 export/ppo_final_N5 wheeltec@<ip>:~/ppo_deploy
+cd ~/ppo_deploy/ppo_final_N1
+/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs1.onnx --noTF32 --saveEngine=actor_fp32_n1.engine
+python3 ~/wheeltec_robot/src/ppo_nav/scripts/build_ptq_engine.py \
+    --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --out actor_int8_n1.engine --batch-size 1
+cd ../ppo_final_N5
+/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs1.onnx --noTF32 --saveEngine=actor_fp32_n5.engine
+python3 ~/wheeltec_robot/src/ppo_nav/scripts/build_ptq_engine.py \
+    --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --out actor_int8_n5.engine --batch-size 1
+```
 
-## 替换环境
+### 5) Real-robot deployment and benchmarking
 
-把 ir-sim 世界 YAML 放入 `configs/world/`，修改 `configs/train.yaml` 的 `env.world_name`（训练场景）
-与 `env.eval_world`（评估场景）。要求：机器人带 `lidar2d` 传感器（beam 数与 `obs.lidar_range_max` 一致）、有 `goal`。
+```bash
+scp -r deploy/ppo_nav/ wheeltec@<ip>:~/wheeltec_robot/src/
+# Build + copy the 4 engines to models/ + launch; full procedure in runs/ablation_runbook.md
+```
 
-## 下一步
+**On-robot 4-cell ablation matrix** (`runs/ablation_runbook.md`):
 
-1. ~~分析 PPO 模型结构~~ ✅（`doc/PPO模型结构分析.md`）
-2. **真机 INT8 收尾**：锁频复测取中位数、FP32 基线确认 `--noTF32`、**输出精度对比**（INT8 vs FP32 max-abs-diff/余弦）、bs8 吞吐基准；
-3. **真机导航测试**：`deploy/ppo_nav` 上车（编译 → 启动 → obs 比对 → 低速试跑），FP32 vs INT8 成功率/碰撞对比；
-4. **PPO action chunking**：为 PPO 实现一次输出 N 步、开环执行，验证防碰撞与降频效果。
+| Cell | Quantization | chunk | Engine | chunk_size | use_prev_action | obs dim |
+|---|---|---|---|---|---|---|
+| ① | FP32 | N=5 | `actor_fp32_n5.engine` | 5 | true | 113 |
+| ② | **INT8** | **N=5 (main experiment)** | `actor_int8_n5.engine` | 5 | true | 113 |
+| ③ | INT8 | N=1 | `actor_int8_n1.engine` | 1 | false | 105 |
+| ④ | FP32 | N=1 | `actor_fp32_n1.engine` | 1 | false | 105 |
 
-> 历史 TD3 流水线（训练/导出 ONNX/板上 TRT 三精度验证）已移除；`runs/trt_bench_results.md`
-> 保留的 TD3 真机三精度数据（如 Orin 上 batch=1 INT8 -33% 等结论）可作 PPO 量化实验的参考。
+---
+
+## Observation / Action Contract (IrSimEnv in env/wrapper.py)
+
+- Observation:
+  - lidar: binned-min then divided by `range_max` (`obs.max_bins`, default = lidar beam count)
+  - goal polar coordinates: `[dist / goal_dist_norm, cos, sin]` (3 dims, `goal_dist_norm` default 10)
+  - previous action (`obs.include_prev_action: true`): `N*action_dim` dims, per-dim `[lin*2, (ang+1)/2]`
+    - N=1: trained through `step_single`, this channel is always 0 (deployment `use_prev_action=false`)
+    - N=5: during chunk training writes back the previous chunk's 5 actions (deployment `use_prev_action=true`, planner accumulates `prev_history_`)
+- Action: normalized `[-1,1]`, mapped to real velocities (diff-drive robot `[linear_vel, angular_vel]`); PPO output is μ, must be clipped to [-1,1]
+- Reward: reaching +100 / collision -100 / per step `lin - 0.5|ang|` / proximity penalty / goal shaping
+- Termination: reaching / collision / timeout (`max_steps`)
+
+## Replacing the Environment
+
+Place ir-sim world YAML files in `configs/world/`, then modify `env.world_name` (training scenario)
+and `env.eval_world` (eval scenario) in `configs/train.yaml`. Requirements: robot equipped with a `lidar2d` sensor (beam count matching `obs.lidar_range_max`), and a `goal`.

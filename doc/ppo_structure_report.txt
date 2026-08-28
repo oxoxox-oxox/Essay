@@ -9,7 +9,7 @@ net_arch          : [1024, 1024]
 activation_fn     : Tanh
 squash_output     : False
 share_features    : True
---- 子网络（mlp_extractor + 输出头） ---
+--- Sub-networks (mlp_extractor + output heads) ---
   [mlp_extractor.policy_net]
     0: Linear(105 -> 1024)  params=108544
     1: Tanh
@@ -24,12 +24,12 @@ share_features    : True
     0: Linear(1024 -> 2)  params=2050
   [value_net]
     0: Linear(1024 -> 1)  params=1025
---- 参数量 ---
-  mlp_extractor(共享+双头前置) : 2316288
-  action_net                 : 2050
-  value_net(输出层)           : 1025
-  策略总参数量                : 2319365
---- 超参数（zip 内保存值） ---
+--- Param counts ---
+  mlp_extractor (shared + two-headed pre-layer): 2316288
+  action_net                                : 2050
+  value_net (output layer)                 : 1025
+  total policy params                     : 2319365
+--- Hyperparameters (values saved in zip) ---
   learning_rate : 0.0003
   gamma         : 0.99
   gae_lambda    : 0.95
@@ -41,7 +41,7 @@ share_features    : True
   vf_coef       : 0.5
   max_grad_norm : 0.5
   num_timesteps : 240000
-  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+  forward check: obs (1, 105) -> dist mean (1, 2), value (1, 1)
 
 === checkpoints/ppo_N1/ppo_model.zip ===
 policy_class      : ActorCriticPolicy
@@ -51,7 +51,7 @@ net_arch          : [1024, 1024]
 activation_fn     : Tanh
 squash_output     : False
 share_features    : True
---- 子网络（mlp_extractor + 输出头） ---
+--- Sub-networks (mlp_extractor + output heads) ---
   [mlp_extractor.policy_net]
     0: Linear(105 -> 1024)  params=108544
     1: Tanh
@@ -66,12 +66,12 @@ share_features    : True
     0: Linear(1024 -> 2)  params=2050
   [value_net]
     0: Linear(1024 -> 1)  params=1025
---- 参数量 ---
-  mlp_extractor(共享+双头前置) : 2316288
-  action_net                 : 2050
-  value_net(输出层)           : 1025
-  策略总参数量                : 2319365
---- 超参数（zip 内保存值） ---
+--- Param counts ---
+  mlp_extractor (shared + two-headed pre-layer): 2316288
+  action_net                                : 2050
+  value_net (output layer)                 : 1025
+  total policy params                     : 2319365
+--- Hyperparameters (values saved in zip) ---
   learning_rate : 0.0003
   gamma         : 0.99
   gae_lambda    : 0.95
@@ -83,7 +83,7 @@ share_features    : True
   vf_coef       : 0.5
   max_grad_norm : 0.5
   num_timesteps : 300032
-  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+  forward check: obs (1, 105) -> dist mean (1, 2), value (1, 1)
 
 === checkpoints/ppo_smoke_N1/best_model.zip ===
 policy_class      : ActorCriticPolicy
@@ -93,7 +93,7 @@ net_arch          : [1024, 1024]
 activation_fn     : Tanh
 squash_output     : False
 share_features    : True
---- 子网络（mlp_extractor + 输出头） ---
+--- Sub-networks (mlp_extractor + output heads) ---
   [mlp_extractor.policy_net]
     0: Linear(105 -> 1024)  params=108544
     1: Tanh
@@ -108,12 +108,12 @@ share_features    : True
     0: Linear(1024 -> 2)  params=2050
   [value_net]
     0: Linear(1024 -> 1)  params=1025
---- 参数量 ---
-  mlp_extractor(共享+双头前置) : 2316288
-  action_net                 : 2050
-  value_net(输出层)           : 1025
-  策略总参数量                : 2319365
---- 超参数（zip 内保存值） ---
+--- Param counts ---
+  mlp_extractor (shared + two-headed pre-layer): 2316288
+  action_net                                : 2050
+  value_net (output layer)                 : 1025
+  total policy params                     : 2319365
+--- Hyperparameters (values saved in zip) ---
   learning_rate : 0.0003
   gamma         : 0.99
   gae_lambda    : 0.95
@@ -125,7 +125,7 @@ share_features    : True
   vf_coef       : 0.5
   max_grad_norm : 0.5
   num_timesteps : 10000
-  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+  forward check: obs (1, 105) -> dist mean (1, 2), value (1, 1)
 
 === checkpoints/ppo_smoke_N1/ppo_model.zip ===
 policy_class      : ActorCriticPolicy
@@ -135,7 +135,7 @@ net_arch          : [1024, 1024]
 activation_fn     : Tanh
 squash_output     : False
 share_features    : True
---- 子网络（mlp_extractor + 输出头） ---
+--- Sub-networks (mlp_extractor + output heads) ---
   [mlp_extractor.policy_net]
     0: Linear(105 -> 1024)  params=108544
     1: Tanh
@@ -150,12 +150,12 @@ share_features    : True
     0: Linear(1024 -> 2)  params=2050
   [value_net]
     0: Linear(1024 -> 1)  params=1025
---- 参数量 ---
-  mlp_extractor(共享+双头前置) : 2316288
-  action_net                 : 2050
-  value_net(输出层)           : 1025
-  策略总参数量                : 2319365
---- 超参数（zip 内保存值） ---
+--- Param counts ---
+  mlp_extractor (shared + two-headed pre-layer): 2316288
+  action_net                                : 2050
+  value_net (output layer)                 : 1025
+  total policy params                     : 2319365
+--- Hyperparameters (values saved in zip) ---
   learning_rate : 0.0003
   gamma         : 0.99
   gae_lambda    : 0.95
@@ -167,6 +167,6 @@ share_features    : True
   vf_coef       : 0.5
   max_grad_norm : 0.5
   num_timesteps : 20480
-  前向检查: obs (1, 105) -> dist mean (1, 2), value (1, 1)
+  forward check: obs (1, 105) -> dist mean (1, 2), value (1, 1)
 
 done

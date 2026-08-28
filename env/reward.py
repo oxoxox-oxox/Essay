@@ -1,15 +1,15 @@
-"""奖励函数设计（对齐 DRL-robot-navigation-IR-SIM 的 SIM.get_reward + 目标 shaping）。
+"""Reward function design (aligned with SIM.get_reward from DRL-robot-navigation-IR-SIM + goal shaping).
 
-每步奖励：
-    - 到达目标: +goal_reward (默认 100)
-    - 碰撞:     +collision_penalty (默认 -100)
-    - 其他:     +lin_vel - ang_penalty_scale*|ang_vel| - 障碍贴近惩罚
-                - time_penalty                       # 每步时间惩罚（鼓励尽快到达）
-                + goal_angle_coef * cos(与目标夹角)      # 朝目标方向有奖励（修复空场绕圈）
-                + goal_dist_coef * (上一距离 - 当前距离)  # 靠近目标 shaping（potential 式，每米）
+Per-step reward:
+    - reached goal: +goal_reward (default 100)
+    - collision:    +collision_penalty (default -100)
+    - otherwise:    +lin_vel - ang_penalty_scale*|ang_vel| - obstacle proximity penalty
+                    - time_penalty                       # per-step time penalty (encourages fast arrival)
+                    + goal_angle_coef * cos(angle to goal)      # heading toward the goal yields reward (fixes open-field circling)
+                    + goal_dist_coef * (prev_dist - dist)       # approaching-goal shaping (potential-style, per meter)
 
-其中障碍贴近惩罚: min(激光距离) < proximity_threshold (1.35) 时,
-  减去 proximity_scale * (proximity_threshold - min_laser)，越近罚越多。
+where the obstacle proximity penalty is: when min(laser distance) < proximity_threshold (1.35),
+   subtract proximity_scale * (proximity_threshold - min_laser), the closer the larger the penalty.
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ import numpy as np
 
 
 class RewardFn:
-    """基于动作/障碍贴近/到达/碰撞/目标方向的奖励（DRL 风格 + goal shaping）。
+    """Reward based on action / obstacle proximity / arrival / collision / heading to goal (DRL style + goal shaping).
 
     Attributes:
-        cfg (dict): reward 配置段。
-        last_reward (float): 最近一次返回的奖励，便于调试。
+        cfg (dict): reward config section.
+        last_reward (float): the most recently returned reward, for debugging.
     """
 
     def __init__(self, cfg: dict) -> None:
@@ -34,13 +34,13 @@ class RewardFn:
         self.proximity_threshold = float(cfg.get("proximity_threshold", 0.5))
         self.proximity_scale = float(cfg.get("proximity_scale", 0.5))
         self.ang_penalty_scale = float(cfg.get("ang_penalty_scale", 0.5))
-        # goal shaping（0 = 关闭，保持旧行为）
+        # goal shaping (0 = disabled, keeps old behavior)
         self.goal_angle_coef = float(cfg.get("goal_angle_coef", 0.0))
         self.goal_dist_coef = float(cfg.get("goal_dist_coef", 0.0))
         self._prev_dist: float | None = None
 
     def reset(self) -> None:
-        """episode 开始时调用（重置距离 shaping 的上一距离）。"""
+        """Called at episode start (resets the previous distance for distance shaping)."""
         self._prev_dist = None
 
     def __call__(
@@ -52,18 +52,18 @@ class RewardFn:
         action: np.ndarray | None = None,
         laser_scan: np.ndarray | None = None,
     ) -> float:
-        """计算单步（单控制步）奖励。
+        """Compute the reward for a single (single control) step.
 
         Args:
-            dist_to_goal: 当前到目标的距离（用于靠近 shaping）。
-            collision: 是否碰撞。
-            arrive: 是否到达目标。
-            angle_to_goal: 朝向与目标方向夹角（rad，用于朝目标奖励 cos(angle)）。
-            action: 施加的真实动作 [lin_vel, ang_vel]（world 单位，非归一化）。
-            laser_scan: 原始 lidar ranges（米），用于障碍贴近惩罚。
+            dist_to_goal: current distance to the goal (for approaching shaping).
+            collision: whether a collision occurred.
+            arrive: whether the goal was reached.
+            angle_to_goal: heading vs goal direction angle (rad, for the cos(angle) toward-goal reward).
+            action: the applied real action [lin_vel, ang_vel] (world units, not normalized).
+            laser_scan: raw lidar ranges (meters), for the obstacle proximity penalty.
 
         Returns:
-            float: 奖励标量。
+            float: the reward scalar.
         """
         if arrive:
             return float(self.goal_reward)
@@ -86,10 +86,10 @@ class RewardFn:
 
         # ---- goal shaping ----
         if self.goal_angle_coef != 0.0 and angle_to_goal is not None:
-            # 朝向目标 +1、背对 -1：让"朝目标走"本身有奖励（空场关键信号）
+            # facing the goal +1, facing away -1: "walking toward the goal" itself yields reward (key signal in open fields)
             reward += self.goal_angle_coef * float(np.cos(angle_to_goal))
         if self.goal_dist_coef != 0.0 and self._prev_dist is not None:
-            # 靠近目标得正、远离得负（potential 式 shaping，每米）
+            # approaching the goal is positive, moving away is negative (potential-style shaping, per meter)
             reward += self.goal_dist_coef * (self._prev_dist - float(dist_to_goal))
         self._prev_dist = float(dist_to_goal)
 
@@ -98,14 +98,14 @@ class RewardFn:
 
 
 def discounted_chunk_reward(rewards: list[float], gamma: float) -> float:
-    """将一个 chunk 内 N 个单步奖励折现求和: sum_k gamma^k * r_k。
+    """Discounted sum of the N single-step rewards inside a chunk: sum_k gamma^k * r_k.
 
     Args:
-        rewards: 长度为 N 的单步奖励列表（可能提前截断）。
-        gamma: 折扣因子。
+        rewards: list of N single-step rewards (may be truncated early).
+        gamma: discount factor.
 
     Returns:
-        float: chunk 的折现回报。
+        float: the chunk's discounted return.
     """
     total = 0.0
     discount = 1.0
@@ -116,5 +116,5 @@ def discounted_chunk_reward(rewards: list[float], gamma: float) -> float:
 
 
 def wrap_angle(angle: float) -> float:
-    """将角度归一化到 [-pi, pi]。"""
+    """Normalize an angle to [-pi, pi]."""
     return float(np.arctan2(np.sin(angle), np.cos(angle)))

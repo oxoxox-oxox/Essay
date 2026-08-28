@@ -1,63 +1,76 @@
-# deploy/ppo_nav — PPO 真机导航部署包（ROS1 Noetic / Jetson Orin Nano / TRT 8.5）
+# deploy/ppo_nav — PPO Real-Robot Navigation Deployment Package (ROS1 Noetic / Jetson Orin Nano / TRT 8.5)
 
-> 重建版：TD3 时代的 td3_nav 已清理，本包按 **PPO 契约**重写。
-> 支持两种模型：**N=1**（obs 105 维，输出 [1,2]）与 **N=5**（obs 113 维，输出 [1,10]）。
-> 消融实验（量化×chunk）的完整上机流程见 `runs/ablation_runbook.md`。
+> This package is the real-robot carrier for the project's "INT8 quantization × action chunking (N=5)": PPO policy → ONNX → TensorRT engine → real-robot navigation.
+> It supports two model variants: **N=1** (obs 105 dims, output [1,2]) and **N=5** (obs 113 dims, output [1,10]).
+> Main experiment = **N=5 + INT8**. Full on-robot / benchmarking procedure is in `runs/ablation_runbook.md`.
 
-## ⚠️ 先读：一个关键事实（影响 obs 构造）
+## ⚠️ Read first: two key facts about obs construction
 
-当前 PPO 模型（`checkpoints/ppo_mw_N1`，多世界重训 v2）训练走 `IrSimEnv.step_single`，而"上一动作"通道
-只在 TD3 的 `step_chunk` 里更新——**PPO 训练时 obs 最后 2 维恒为 0**（已用 calib_obs.npz 验证）。
-因此 `obs_builder` **默认输出 0**（`planner.use_prev_action: false`），与训练分布一致；
-不要改成真实上一动作，除非你用带 prev 反馈重新训练的模型。
+1. **N=1 models** are trained through `IrSimEnv.step_single`, so the "previous action" channel is always 0
+   (verified with calib_obs.npz) → `obs_builder` **outputs 0 by default** (`use_prev_action: false`).
+2. **N=5 models** are trained with action chunking; the obs "previous action" channel = the previous chunk's 5 actions
+   → deployment uses `use_prev_action: true`, with the planner accumulating `prev_history_`.
 
-## 包结构
+   ⚠️ Both must strictly match the model in use (see the matrix in `runs/ablation_runbook.md` section 0).
+
+## Package Structure
 
 ```
 deploy/ppo_nav/
-├─ package.xml / CMakeLists.txt   # catkin 包（gnu++14，TRT 8.5 + CUDA）
-├─ include/ppo_nav/obs_builder.hpp       # obs 105 维构造（与 env/wrapper.py 一致）
-├─ include/ppo_nav/tensorrt_engine.hpp   # TRT 引擎封装
-├─ src/obs_builder.cpp           # lidar 前向重采样/归一化 + goal [dist/10,cos,sin] + prev(0)
-├─ src/tensorrt_engine.cpp       # 引擎 load/forward（CUDA buffer，同步）
-├─ src/planner_node.cpp          # /scan+/odom -> obs -> 推理 -> /cmd_vel_planner
-├─ src/safety_node.cpp           # 限幅/急停/看门狗/电量/充电 -> /cmd_vel
-├─ config/params.yaml            # 全部可调参数
-└─ launch/planner.launch         # planner + safety 一起起；safety.launch 可单独起
+├─ package.xml / CMakeLists.txt   # catkin package (gnu++14, TRT 8.5 + CUDA)
+├─ include/ppo_nav/obs_builder.hpp       # obs construction (N=1:105 dims / N=5:113 dims, consistent with env/wrapper.py)
+├─ include/ppo_nav/tensorrt_engine.hpp   # TRT engine wrapper
+├─ src/obs_builder.cpp           # lidar forward resampling/normalization + goal [dist/10,cos,sin] + prev
+├─ src/tensorrt_engine.cpp       # engine load/forward (CUDA buffers, synchronous)
+├─ src/planner_node.cpp          # /scan+/odom -> obs -> inference -> /cmd_vel_planner (chunk open-loop execution)
+├─ src/safety_node.cpp           # clipping/emergency-stop/watchdog/battery/charging -> /cmd_vel
+├─ config/params.yaml            # all tunable parameters (chunk_size / use_prev_action / velocity clamps…)
+├─ launch/planner.launch         # starts planner + safety together; safety.launch can be started alone
+├─ scripts/measure_node.py       # real-robot benchmarking measurement (latency/frequency/emergency-stop)
+└─ scripts/build_ptq_engine.py   # build INT8 engine on board (real-obs calibration, batch=1 for navigation)
 ```
 
-## 数据契约（obs / action 精确格式）
+## Data Contract (exact obs / action format)
 
-- 输入 `obs [1,105]`：
-  - `[0:100]` lidar：前向±90°按训练角度（linspace(-π/2, π/2, 100)）重采样 100 束，
-    inf/NaN/>7.0 按 1.0；`/range_max_norm(7.0)`
-  - `[100:103]` goal 极坐标：`[dist / goal_dist_norm(10), cos(a), sin(a)]`，`a = wrap(atan2(gy-y, gx-x) - yaw)`
-  - `[103:105]` 上一动作：**恒 0**（见上；训练时该通道为 0）
-- 输出 `action [1,2]`：μ（PPO 无输出 tanh）→ 节点内 `clip(μ, [-1,1])` →
-  `scale_action`：`vel_min + (a+1)/2 * (vel_max-vel_min)` → `max_linear/max_angular` 限幅 → `/cmd_vel_planner`
-- 决策由**雷达帧驱动**（收到新 `/scan` 就串行推理一次，约 12Hz）；可选 `min_decision_period` 节流
-  （0=纯帧驱动；设 0.3 可把决策频率压回训练 step_time）；goal 定义在 `odom_combined` 系（相对起点）
+- Input `obs [1,105]` (N=1) or `[1,113]` (N=5):
+  - `[0:100]` lidar: resampled to 100 beams across forward ±90° at the training angles (linspace(-π/2, π/2, 100)),
+    inf/NaN/>7.0 set to 1.0; `/range_max_norm(7.0)`
+  - `[100:103]` goal polar coordinates: `[dist / goal_dist_norm(10), cos(a), sin(a)]`, `a = wrap(atan2(gy-y, gx-x) - yaw)`
+  - `[103:]` previous action:
+    - N=1 → `[103:105]` always 0 (`use_prev_action: false`)
+    - N=5 → `[103:113]` previous chunk's 5 actions (`use_prev_action: true`, accumulated by the planner)
+- Output `action [1,2]` (N=1) or `[1,10]` (N=5): μ (PPO has no output tanh) → in-node `clip(μ, [-1,1])` →
+  `scale_action`: `vel_min + (a+1)/2 * (vel_max-vel_min)` → `max_linear/max_angular` clamps → `/cmd_vel_planner`
+- Decisions are **driven by the laser frames** (each new `/scan` triggers one serial inference, ~12Hz); with `chunk_size>1`
+  a single inference produces N open-loop steps, cutting inference frequency to 1/N; optional `min_decision_period` throttling.
+- goal is defined in the `odom_combined` frame (relative to start)
 
-## 上机步骤
+## On-Robot Procedure
 
-### 1) PC 侧产物（已生成，无需重复）
+### 1) PC-side artifacts (see root README step 3)
 
 ```bash
-d:/anaconda/envs/rl_env/python.exe train/unpack_ppo_actor.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip --name ppo_mw
-d:/anaconda/envs/ir-sim/python.exe train/export_ppo_onnx.py --actor export/ppo_mw/policy_actor.pt --make-calib
+d:/anaconda/envs/rl_env/python.exe onnx/unpack_ppo_actor.py --checkpoint checkpoints/ppo_final_N1/best_model.zip --name ppo_final_N1
+d:/anaconda/envs/ir-sim/python.exe onnx/export_ppo_onnx.py --actor export/ppo_final_N1/policy_actor.pt --make-calib
+d:/anaconda/envs/rl_env/python.exe onnx/unpack_ppo_actor.py --checkpoint checkpoints/ppo_final_N5/best_model.zip --name ppo_final_N5
+d:/anaconda/envs/ir-sim/python.exe onnx/export_ppo_onnx.py --actor export/ppo_final_N5/policy_actor.pt --make-calib --chunk 5
 ```
 
-### 2) 同步到板上并建引擎（batch=1！）
+### 2) Build engines on board (batch=1!)
 
 ```bash
-scp -r export/ppo_mw/ wheeltec@<ip>:~/ppo_deploy/
-ssh wheeltec@<ip>
-cd ~/ppo_deploy
-/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs1.onnx --noTF32 --saveEngine=actor_fp32.engine
-python3 build_ptq_engine.py --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --out actor_int8.engine --batch-size 1
+scp -r export/ppo_final_N1 export/ppo_final_N5 wheeltec@<ip>:~/ppo_deploy/
+ssh wheeltec@<ip>; cd ~/ppo_deploy/ppo_final_N1
+/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs1.onnx --noTF32 --saveEngine=actor_fp32_n1.engine
+python3 ~/wheeltec_robot/src/ppo_nav/scripts/build_ptq_engine.py \
+    --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --out actor_int8_n1.engine --batch-size 1
+cd ../ppo_final_N5
+/usr/src/tensorrt/bin/trtexec --onnx=actor_fp32_bs1.onnx --noTF32 --saveEngine=actor_fp32_n5.engine
+python3 ~/wheeltec_robot/src/ppo_nav/scripts/build_ptq_engine.py \
+    --onnx actor_fp32_bs1.onnx --calib calib_obs.npz --out actor_int8_n5.engine --batch-size 1
 ```
 
-### 3) 同步包并编译
+### 3) Sync package and build
 
 ```bash
 scp -r deploy/ppo_nav/ wheeltec@<ip>:~/wheeltec_robot/src/
@@ -68,52 +81,63 @@ rm -rf build/ppo_nav
 catkin_make -DCATKIN_WHITELIST_PACKAGES="ppo_nav" -j$(nproc)
 source devel/setup.bash
 catkin_make -DCATKIN_WHITELIST_PACKAGES=""
-# 把引擎放进包内 models/（或启动时用绝对路径 engine_path:= 覆盖）
+# Put the engines into the package models/ (or override at launch with absolute engine_path:=)
 mkdir -p ~/wheeltec_robot/src/ppo_nav/models
-cp ~/ppo_deploy/actor_fp32.engine ~/ppo_deploy/actor_int8.engine ~/wheeltec_robot/src/ppo_nav/models/
+cp ~/ppo_deploy/ppo_final_N1/actor_{fp32,int8}_n1.engine ~/wheeltec_robot/src/ppo_nav/models/
+cp ~/ppo_deploy/ppo_final_N5/actor_{fp32,int8}_n5.engine ~/wheeltec_robot/src/ppo_nav/models/
 ```
 
-> 编译成功判据：`catkin_make` 输出**必须出现** `Building CXX object .../planner_node.dir/...`；
-> 若只有 `Built target` + `Clock skew detected` = 没重编（旧二进制）。TRT 的 `deprecated` 警告正常。
+> Build success criterion: the `catkin_make` output **must contain** `Building CXX object .../planner_node.dir/...`;
+> if you only see `Built target` + `Clock skew detected` = not recompiled (old binary). TRT `deprecated` warnings are normal.
 
-### 4) 启动
+### 4) Launch (change parameters per cell; full 4-cell matrix in the runbook)
 
 ```bash
-roslaunch ppo_nav planner.launch engine_path:=/home/wheeltec/wheeltec_robot/src/ppo_nav/models/actor_int8.engine
-# 或换 FP32 基线（单一变量）：engine_path:=.../actor_fp32.engine
-# safety 已在 planner.launch 内；也可单独: roslaunch ppo_nav safety.launch
+# Main experiment: INT8 + N=5
+rosparam set /planner/chunk_size 5
+rosparam set /planner/use_prev_action true
+roslaunch ppo_nav planner.launch engine_path:=/home/wheeltec/wheeltec_robot/src/ppo_nav/models/actor_int8_n5.engine
+# Or switch to the FP32 baseline (single variable): engine_path:=.../actor_fp32_n5.engine
+# N=1 cells: chunk_size 1, use_prev_action false, use actor_*_n1.engine
+# safety is already in planner.launch; or launch alone: roslaunch ppo_nav safety.launch
 ```
 
-### 5) 上车验证顺序
+### 5) On-vehicle verification order
 
-1. 先不松手刹：确认 `[TRT] engine loaded: input 105 elements, output 2 elements`、`/cmd_vel_planner` 有输出
-2. `reverse_scan` 现场校验：障碍放车头一侧，看最近束 base 角应≈±90°（决定 reverse_scan 取值）
-3. obs 数值比对：`debug_log=true` 打点 obs/action，与 PC 上 torch 输出做 max abs diff（应 < 0.05）
-4. `max_linear` 保持小值（建议 0.3）低速试跑，逐级加障碍
+1. Keep the handbrake released first: confirm `[TRT] engine loaded: input 113 elements, output 10 elements` (N=5)
+   or `input 105, output 2` (N=1) — **input dimension must match**, otherwise the engine was built/parameterized wrong.
+2. On-site `reverse_scan` check: place an obstacle beside the front, verify the closest beam base angle ≈±90° (decides the reverse_scan value).
+3. obs value comparison: `debug_log=true` prints obs/action, compare with the torch output on PC via max abs diff (should be < 0.05).
+4. Keep `max_linear` small (recommended 0.3), test at low speed, add obstacles gradually.
 
-## 日志判读
+## Log Interpretation
 
-**正常**：
+**Normal** (N=1):
 ```
 [TRT] engine loaded: input 105 elements, output 2 elements
 [planner] ready. goal=(5.00, 5.00), period=0.30s, use_prev_action=0
-# 无 engine forward failed
+# no engine forward failed
 ```
+**Normal** (N=5):
+```
+[TRT] engine loaded: input 113 elements, output 10 elements
+[planner] ready. goal=(5.00, 5.00), period=0.30s, use_prev_action=1
+```
+**Abnormal `engine input=105 (expect 105)` mismatch**: wrong engine batch (a bs8 engine was used) → return to step 2 and rebuild a batch=1 engine.
 
-**异常 `engine input=105 (expect 105)` 不一致**：引擎 batch 填错（用了 bs8 引擎）→ 回第 2 步重建 batch=1 引擎。
+## Parameters (config/params.yaml, overridable at launch)
 
-## 参数（config/params.yaml，launch 可覆盖）
+goal_x/goal_y (odom frame), min_decision_period(0.0, frame-driven; set 0.3 to match training), scan_timeout(0.5), debug_log,
+num_beams(100)/range_max_norm(7.0)/goal_dist_norm(10.0)/half_fov_deg(90)/laser_yaw_fallback_deg(180)/reverse_scan,
+chunk_size(1; use 5 for N=5), use_prev_action(false; use true for N=5), vel_min/vel_max, max_linear(0.8, set to 0.3 before driving)/max_angular(1.0),
+safety section (stop_dist/slow_dist/slow_factor/min_voltage/watchdog_timeout/front_only).
 
-goal_x/goal_y（odom 系）、min_decision_period(0.0，帧驱动；对齐训练设 0.3)、scan_timeout(0.5)、debug_log、
-num_beams(100)/range_max_norm(7.0)/goal_dist_norm(10.0)/half_fov_deg(90)/laser_yaw_fallback_deg(180)/reverse_scan、
-chunk_size(1)、use_prev_action(false)、vel_min/vel_max、max_linear(0.8，上车先调 0.3)/max_angular(1.0)、
-safety 段（stop_dist/slow_dist/slow_factor/min_voltage/watchdog_timeout/front_only）。
+## Pitfall Quick Reference
 
-## 踩坑速查
-
-- **引擎 batch**：导航恒用 batch=1 引擎（`--batch-size 1` 不能省），bs8 引擎 forward 尺寸不匹配会停车
-- **Clock skew 跳过编译**：scp 带未来 mtime → 先 `touch` 源码再编（见第 3 步）
-- **CATKIN_WHITELIST_PACKAGES**：单包构建后必须用 `""` 清空恢复整工作区
-- **gnu++14**：`-std=c++14` 会隐藏 M_PI 编译失败；TRT deprecated 警告不影响成功
-- **命令行 `$(find)`**：bash 会先展开 `$()` → 启动时 engine_path 用绝对路径或单引号
-- **TF32**：FP32 基线引擎必须 `--noTF32` 才是真 FP32
+- **Engine batch**: navigation always uses batch=1 engines (`--batch-size 1` is mandatory); a bs8 engine will stop the robot on forward size mismatch
+- **N=5 obs dim**: 113 = 100 lidar + 3 goal + 10 prev; if the engine input doesn't match it will stop the robot
+- **Clock skew skips compilation**: scp carries future mtimes → `touch` the sources before building (see step 3)
+- **CATKIN_WHITELIST_PACKAGES**: after building a single package, reset with `""` to restore the whole workspace
+- **gnu++14**: `-std=c++14` will hide the M_PI compilation failure; TRT deprecated warnings don't affect success
+- **Command-line `$(find)`**: bash expands `$()` first → use an absolute path or single quotes for engine_path at launch
+- **TF32**: FP32 baseline engines must use `--noTF32` to be true FP32

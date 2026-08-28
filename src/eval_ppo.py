@@ -1,14 +1,14 @@
-"""SB3 PPO 独立评估脚本（与 src/train_ppo.py 分离）。
+"""SB3 PPO standalone evaluation script (separated from src/train_ppo.py).
 
-评估环境：configs/train.yaml 的 eval_world（--world 可覆盖），
-确定性动作（model.predict(deterministic=True)），
-输出成功率/碰撞率/超时率/平均步数/平均奖励。
+Eval env: the eval_world from configs/train.yaml (--world can override),
+deterministic actions (model.predict(deterministic=True)),
+outputs success/collision/timeout rates, average steps, average reward.
 
-用法:
-    python src/eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip        # 无头 20 集
-    python src/eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip --episodes 3 --display   # 可视化
+Usage:
+    python src/eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip        # headless 20 episodes
+    python src/eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip --episodes 3 --display   # visualization
     python src/eval_ppo.py --checkpoint checkpoints/ppo_mw_N1/best_model.zip \
-        --world configs/world/robot_world.yaml                                          # 换评估世界
+        --world configs/world/robot_world.yaml                                          # switch eval world
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import argparse
 import os
 import sys
 
-# headless 服务器（Linux 且无 DISPLAY）强制 matplotlib Agg 后端；桌面/Windows 保留 GUI 供 --display 可视化
+# headless server (Linux without DISPLAY) forces the matplotlib Agg backend; desktop/Windows keeps GUI for --display visualization
 if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
     os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -32,7 +32,7 @@ from utils.config import deep_update, load_config, resolve_path  # noqa: E402
 
 def final_eval(model: PPO, cfg: dict, episodes: int, seed: int,
                display: bool, max_steps: int, chunk_size: int = 1) -> dict:
-    """在 eval_world 上跑 deterministic 评估，输出成功率/碰撞率等指标。"""
+    """Run a deterministic eval on eval_world, outputting success/collision rates etc."""
     irsim_env = IrSimEnv(
         resolve_path(cfg["env"]["eval_world"]),
         reward_cfg=cfg["reward"],
@@ -80,17 +80,17 @@ def final_eval(model: PPO, cfg: dict, episodes: int, seed: int,
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="SB3 PPO 模型评估（训练请用 src/train_ppo.py）"
+        description="SB3 PPO model evaluation (train with src/train_ppo.py)"
     )
     ap.add_argument("--checkpoint", required=True,
-                    help="SB3 zip 模型路径，如 checkpoints/ppo_mw_N1/best_model.zip")
+                    help="SB3 zip model path, e.g. checkpoints/ppo_mw_N1/best_model.zip")
     ap.add_argument("--config", default="configs/train.yaml")
-    ap.add_argument("--episodes", type=int, default=20, help="评估 episode 数")
+    ap.add_argument("--episodes", type=int, default=20, help="number of eval episodes")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
-    ap.add_argument("--display", action="store_true", help="可视化（弹 matplotlib 窗口）")
+    ap.add_argument("--display", action="store_true", help="visualize (opens a matplotlib window)")
     ap.add_argument("--world", type=str, default=None,
-                    help="评估世界 YAML（覆盖 eval_world；默认 configs/train.yaml 的 eval_world）")
+                    help="eval world YAML (overrides eval_world; default is eval_world from configs/train.yaml)")
     args = ap.parse_args()
 
     cfg = load_config(resolve_path(args.config))
@@ -98,7 +98,7 @@ def main() -> None:
         cfg = deep_update(cfg, {"env": {"eval_world": args.world}})
 
     model = PPO.load(args.checkpoint, device=args.device)
-    # 从模型动作空间推断 chunk 长度（单步=2 维，chunk N 维 = N*2）
+    # infer the chunk length from the model's action space (single-step = 2 dims, chunk N dims = N*2)
     chunk_size = int(model.action_space.shape[0]) // 2
     cfg = deep_update(cfg, {"obs": {"prev_chunk_size": chunk_size},
                             "chunk": {"size": chunk_size}})

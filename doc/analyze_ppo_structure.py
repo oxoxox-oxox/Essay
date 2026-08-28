@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""分析仓库内 SB3 PPO 模型的网络结构（供 doc/PPO模型结构分析.md 复现）。
+"""Analyze the network structure of the SB3 PPO models in this repository (for reproducing doc/ppo_structure_analysis.md).
 
-用法:
+Usage:
     d:\anaconda\envs\rl_env\python.exe doc\analyze_ppo_structure.py
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ def dump_seq(name: str, seq: torch.nn.Module) -> None:
 def analyze(path: str) -> None:
     full = os.path.join(REPO_ROOT, path)
     if not os.path.exists(full):
-        _print(f"=== {path} : 不存在，跳过 ===")
+        _print(f"=== {path} : not found, skipped ===")
         _print()
         return
     _print(f"=== {path} ===")
@@ -68,7 +68,7 @@ def analyze(path: str) -> None:
     _print(f"squash_output     : {pol.squash_output}")
     _print(f"share_features    : {pol.share_features_extractor}")
 
-    _print("--- 子网络（mlp_extractor + 输出头） ---")
+    _print("--- Sub-networks (mlp_extractor + output heads) ---")
     ext = pol.mlp_extractor
     for name, child in ext.named_children():
         dump_seq(f"mlp_extractor.{name}", child)
@@ -79,13 +79,13 @@ def analyze(path: str) -> None:
     n_act = count_params(pol.action_net)
     n_val = count_params(pol.value_net)
     n_total = count_params(pol)
-    _print("--- 参数量 ---")
-    _print(f"  mlp_extractor(共享+双头前置) : {n_ext}")
-    _print(f"  action_net                 : {n_act}")
-    _print(f"  value_net(输出层)           : {n_val}")
-    _print(f"  策略总参数量                : {n_total}")
+    _print("--- Param counts ---")
+    _print(f"  mlp_extractor (shared + two-headed pre-layer): {n_ext}")
+    _print(f"  action_net                                : {n_act}")
+    _print(f"  value_net (output layer)                 : {n_val}")
+    _print(f"  total policy params                     : {n_total}")
 
-    _print("--- 超参数（zip 内保存值） ---")
+    _print("--- Hyperparameters (values saved in zip) ---")
     for k in ["learning_rate", "gamma", "gae_lambda", "n_steps", "batch_size", "n_epochs",
               "clip_range", "ent_coef", "vf_coef", "max_grad_norm"]:
         _print(f"  {k:14s}: {getattr(model, k, None)}")
@@ -96,7 +96,7 @@ def analyze(path: str) -> None:
         dist = pol.get_distribution(x)
         val = pol.predict_values(x)
         dist_mean = getattr(getattr(dist, "distribution", None), "mean", None)
-    _print(f"  前向检查: obs {tuple(x.shape)} -> dist mean {tuple(dist_mean.shape) if dist_mean is not None else None}, value {tuple(val.shape)}")
+    _print(f"  forward check: obs {tuple(x.shape)} -> dist mean {tuple(dist_mean.shape) if dist_mean is not None else None}, value {tuple(val.shape)}")
     _print()
     del model
 

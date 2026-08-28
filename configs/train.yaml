@@ -1,85 +1,85 @@
-# PPO 训练总配置（SB3 PPO，ir-sim 环境）
-# 说明：以该文件所在目录为 project root，脚本从仓库根目录运行。
+# Master config for PPO training (SB3 PPO, ir-sim env)
+# Note: the project root is the directory containing this file; scripts are run from the repo root.
 
 project:
   run_dir: "runs"
   checkpoint_dir: "checkpoints"
 
-# ir-sim 环境（把世界 YAML 放进 configs/world/，这里填文件名即可）
+# ir-sim env (put world YAML files into configs/world/, fill in the filename here)
 env:
-  world_name: "configs/world/robot_world.yaml"   # 单世界训练时用（多世界时被 worlds 取代）
-  eval_world: "configs/world/eval_world.yaml"    # 评估场景（评估代码统一使用）
-  # ---- 多世界训练（src/train_ppo.py 每次 reset 随机换世界；每项可覆盖 start_range/fixed_goal）----
-  # 目的：开阔空场 + 稀疏 + 走廊 + 密集 + 动态，修复"空场绕圈"并保持避障能力
+  world_name: "configs/world/robot_world.yaml"   # used for single-world training (superseded by worlds when multi-world)
+  eval_world: "configs/world/eval_world.yaml"    # eval scenario (used uniformly by eval code)
+  # ---- Multi-world training (src/train_ppo.py picks a random world on each reset; each entry can override start_range/fixed_goal) ----
+  # Purpose: open field + sparse + corridor + cluttered + dynamic, fixes "open-field circling" while keeping obstacle avoidance
   worlds:
-    - world: "configs/world/robot_world.yaml"     # 原训练世界（10x10 动态杂乱）
-    - world: "configs/world/open_field.yaml"      # 开阔空场（30x30，激光全满量程）
+    - world: "configs/world/robot_world.yaml"     # original training world (10x10 dynamic clutter)
+    - world: "configs/world/open_field.yaml"      # open field (30x30, lidar at full range)
       start_range_low: [8.0, 8.0, -3.14]
       start_range_high: [22.0, 22.0, 3.14]
       fixed_goal: [15.0, 15.0, 0.0]
-    - world: "configs/world/sparse_obs.yaml"      # 稀疏障碍（30x30）
+    - world: "configs/world/sparse_obs.yaml"      # sparse obstacles (30x30)
       start_range_low: [5.0, 5.0, -3.14]
       start_range_high: [25.0, 25.0, 3.14]
       fixed_goal: [15.0, 15.0, 0.0]
-    - world: "configs/world/corridor.yaml"        # 走廊（30x30）
+    - world: "configs/world/corridor.yaml"        # corridor (30x30)
       start_range_low: [4.0, 14.0, -0.5]
       start_range_high: [8.0, 16.0, 0.5]
       fixed_goal: [24.0, 15.0, 0.0]
-    - world: "configs/world/cluttered.yaml"       # 密集凸障碍（30x30）
+    - world: "configs/world/cluttered.yaml"       # dense convex obstacles (30x30)
       start_range_low: [3.0, 3.0, -3.14]
       start_range_high: [27.0, 27.0, 3.14]
       fixed_goal: [24.0, 8.0, 0.0]
-    - world: "configs/world/dynamic.yaml"         # 动态障碍（30x30）
+    - world: "configs/world/dynamic.yaml"         # dynamic obstacles (30x30)
       start_range_low: [5.0, 5.0, -3.14]
       start_range_high: [25.0, 25.0, 3.14]
       fixed_goal: [24.0, 24.0, 0.0]
-  step_time: 0.0833        # 仿真步长(s) = 1/12，对齐真机 12Hz 雷达帧率（覆盖世界 YAML 的 0.3）
+  step_time: 0.0833        # simulation step (s) = 1/12, matches real-robot 12Hz lidar frame rate (overrides the world YAML's 0.3)
   display: false
   log_level: "WARNING"
-  random_start: true                             # 每个 episode 随机机器人初始位置
-  start_range_low: [1.0, 1.0, -3.14]             # 随机起点下限 [x, y, theta]
-  start_range_high: [9.0, 9.0, 3.14]             # 随机起点上限 [x, y, theta]
-  fixed_goal: [9.0, 9.0, 0.0]                    # 固定目标点（世界 YAML 的 goal 亦保持固定）
+  random_start: true                             # randomize robot initial pose each episode
+  start_range_low: [1.0, 1.0, -3.14]             # random start lower bound [x, y, theta]
+  start_range_high: [9.0, 9.0, 3.14]             # random start upper bound [x, y, theta]
+  fixed_goal: [9.0, 9.0, 0.0]                    # fixed goal (the world YAML's goal also stays fixed)
 
 obs:
-  lidar_len: 100            # 仅作参考/一致性检查，实际以 env 读到的 beam 数为准
-  lidar_range_max: 7.0      # 归一化用，应与世界 YAML 中 lidar2d.range_max 一致
-  max_bins: 100             # lidar 分箱数（DRL 风格：每 bin_size 束取 min / range_max；=lidar_len 时不降维）
-  include_goal: true        # 观测是否拼接 goal 极坐标
+  lidar_len: 100            # reference/consistency check only; the actual beam count comes from the env
+  lidar_range_max: 7.0      # used for normalization, must match lidar2d.range_max in the world YAML
+  max_bins: 100             # lidar bin count (DRL style: min over each bin_size beams / range_max; no downsampling when =lidar_len)
+  include_goal: true        # whether to append the goal polar coordinates to the observation
   goal_dim: 3               # [dist/goal_dist_norm, cos, sin]
-  goal_dist_norm: 10.0      # goal 距离归一化除数（对齐 DRL 的 distance/10）
-  include_prev_action: true # 观测中编码上一动作（每步按 DRL 归一化 [lin*2, (ang+1)/2]），prev_dim=chunk.size*action_dim
-  prev_chunk_size: 1       # 上一动作通道长度（= chunk.size；train_ppo.py 按 --chunk 覆盖）
+  goal_dist_norm: 10.0      # divisor for normalizing goal distance (matches DRL's distance/10)
+  include_prev_action: true # encode the previous action in the observation (per-step DRL normalization [lin*2, (ang+1)/2]), prev_dim=chunk.size*action_dim
+  prev_chunk_size: 1       # length of the previous-action channel (= chunk.size; train_ppo.py overrides via --chunk)
 
 action:
-  action_dim: 2             # [linear_vel, angular_vel]（diff 机器人）
+  action_dim: 2             # [linear_vel, angular_vel] (diff-drive robot)
   vel_min: [-1.0, -1.0]
   vel_max: [1.0, 1.0]
 
 reward:
-  # 对齐 DRL-robot-navigation-IR-SIM 的奖励（SIM.get_reward）
-  # 到达 +goal_reward；碰撞 +collision_penalty；
-  # 其他: +lin_vel - ang_penalty_scale*|ang_vel| - 障碍贴近惩罚
-  # 障碍贴近惩罚: min(激光距离) < proximity_threshold 时，
-  #   减去 proximity_scale * (proximity_threshold - min_laser)，越近罚越多。
+  # Reward aligned with DRL-robot-navigation-IR-SIM (SIM.get_reward)
+  # Reached: +goal_reward; collision: +collision_penalty;
+  # otherwise: +lin_vel - ang_penalty_scale*|ang_vel| - obstacle proximity penalty
+  # Obstacle proximity penalty: when min(laser distance) < proximity_threshold,
+  #   subtract proximity_scale * (proximity_threshold - min_laser), the closer the larger the penalty.
   goal_reward: 400.0
   collision_penalty: -100.0
-  proximity_threshold: 5    # 障碍贴近惩罚阈值（米），对齐原版
-  proximity_scale: 0.5         # (threshold - min_laser) 的缩放系数
-  ang_penalty_scale: 0.5       # |angular_vel| 惩罚系数
-  backward_penalty: 0.0        # 倒退惩罚：原版无，置 0 关闭
-  # ---- goal shaping（修复空场绕圈：让"朝目标"本身有奖励）----
-  goal_angle_coef: 0.5         # 朝目标方向奖励系数：+coef*cos(与目标夹角)，朝向+、背对-
-  goal_dist_coef: 1.0          # 靠近目标 shaping：每靠近 1m 得 +coef（potential 式，置 0 关闭）
-  max_steps: 1800              # 单 episode 最大控制步数（83ms/步 × 1800 ≈ 150s，对齐原 0.3s×500）
-  time_penalty: 0.1            # 每步时间惩罚（非到达/碰撞步都减去该值，鼓励尽快到达）
+  proximity_threshold: 5    # obstacle proximity penalty threshold (meters), aligned with the original
+  proximity_scale: 0.5         # scale factor for (threshold - min_laser)
+  ang_penalty_scale: 0.5       # |angular_vel| penalty coefficient
+  backward_penalty: 0.0        # backward penalty: none in the original, set to 0 to disable
+  # ---- goal shaping (fixes open-field circling: "heading toward the goal" itself yields reward) ----
+  goal_angle_coef: 0.5         # reward coefficient for heading toward the goal: +coef*cos(angle to goal), positive facing it, negative facing away
+  goal_dist_coef: 1.0          # approaching-goal shaping: +coef per 1m closer (potential-style, set to 0 to disable)
+  max_steps: 1800              # max control steps per episode (83ms/step x 1800 ≈ 150s, matches the original 0.3s x 500)
+  time_penalty: 0.1            # per-step time penalty (subtracted from every non-reached/non-collision step, encourages fast arrival)
 
 model:
-  hidden1: 1024             # SB3 MlpPolicy 第一层隐藏宽度
-  hidden2: 1024             # SB3 MlpPolicy 第二层隐藏宽度
+  hidden1: 1024             # SB3 MlpPolicy first hidden layer width
+  hidden2: 1024             # SB3 MlpPolicy second hidden layer width
 
 chunk:
-  size: 1                   # action chunking：N。1=无 chunking（PPO 当前为单步 N=1）
+  size: 1                   # action chunking: N. 1=no chunking (PPO currently single-step N=1)
 
 eval:
-  max_steps: 1800           # 评估单 episode 步数上限（对齐训练 83ms/步 × 1800）
+  max_steps: 1800           # eval per-episode step cap (matches training 83ms/step x 1800)

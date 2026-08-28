@@ -95,7 +95,7 @@ bool TrtEngine::forward(const std::vector<float>& obs, std::vector<float>& actio
   if (cudaMemcpyAsync(input_buf_, obs.data(), input_dim_ * sizeof(float),
                       cudaMemcpyHostToDevice, stream_) != cudaSuccess)
     return false;
-  if (!context_->enqueueV2(bindings, stream_, nullptr)) return false;  // TRT 8.5 deprecated 但可用
+  if (!context_->enqueueV2(bindings, stream_, nullptr)) return false;  // deprecated in TRT 8.5 but usable
   if (cudaMemcpyAsync(action.data(), output_buf_, output_dim_ * sizeof(float),
                       cudaMemcpyDeviceToHost, stream_) != cudaSuccess)
     return false;

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(ppo_nav)
 
-# gnu++14 以启用 M_PI 等 GNU 扩展（-std=c++14 会隐藏 M_PI 导致编译失败）
+# gnu++14 enables GNU extensions such as M_PI (-std=c++14 hides M_PI, causing a compile failure)
 add_compile_options(-std=gnu++14)
 
 find_package(catkin REQUIRED COMPONENTS
@@ -14,10 +14,10 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_geometry_msgs
 )
 
-# planner_node 用 std::thread（事件驱动 worker），显式链接 pthread
+# planner_node uses std::thread (event-driven worker), link pthread explicitly
 find_package(Threads REQUIRED)
 
-# ---- CUDA（Jetson: /usr/local/cuda）----
+# ---- CUDA (Jetson: /usr/local/cuda) ----
 find_package(CUDA QUIET)
 if(NOT CUDA_FOUND AND EXISTS "/usr/local/cuda")
   set(CUDA_FOUND TRUE)
@@ -30,10 +30,10 @@ if(CUDA_FOUND)
   include_directories(${CUDA_INCLUDE_DIRS})
   set(EXTRA_LIBS ${CUDA_LIBRARIES})
 else()
-  message(WARNING "CUDA not found, cuda_runtime_api.h 可能缺失导致编译失败")
+  message(WARNING "CUDA not found, cuda_runtime_api.h may be missing and cause a compile failure")
 endif()
 
-# ---- TensorRT (JetPack 自带: /usr/lib/aarch64-linux-gnu, /usr/include/aarch64-linux-gnu) ----
+# ---- TensorRT (JetPack bundled: /usr/lib/aarch64-linux-gnu, /usr/include/aarch64-linux-gnu) ----
 find_library(TRT_LIB NAMES nvinfer)
 if(NOT TRT_LIB)
   find_path(_TRT_LIBDIR NAMES libnvinfer.so.8

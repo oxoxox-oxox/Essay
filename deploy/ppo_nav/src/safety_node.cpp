@@ -1,12 +1,12 @@
-/// 安全节点：在 planner 输出(/cmd_vel_planner)到真机 /cmd_vel 之间做兜底。
+/// Safety node: fallback between the planner output (/cmd_vel_planner) and the real /cmd_vel.
 ///
-/// 检查项（任一触发 -> 停):
-///   - 激光最近距离 < stop_dist
-///   - 电量 < min_voltage
-///   - charging/recharge/red flag 置位
-///   - planner 输出超时 (watchdog_timeout)
-/// 减速带: stop_dist < 最近距离 < slow_dist 时按 slow_factor 缩放。
-/// 最终输出再按 max_linear/max_angular 限幅。
+/// Checks (any trigger -> stop):
+///   - nearest laser distance < stop_dist
+///   - battery < min_voltage
+///   - charging/recharge/red flag set
+///   - planner output timeout (watchdog_timeout)
+/// Slow zone: when stop_dist < nearest distance < slow_dist, scale by slow_factor.
+/// The final output is also clamped by max_linear/max_angular.
 #include <geometry_msgs/Twist.h>
 #include <ros/ros.h>
 #include <sensor_msgs/LaserScan.h>
@@ -31,7 +31,7 @@ class SafetyNode {
     pnh.param("watchdog_timeout", watchdog_timeout_, 0.6);
     pnh.param("max_linear", max_linear_, 0.8);
     pnh.param("max_angular", max_angular_, 1.0);
-    pnh.param("front_only", front_only_, false);  // true 时只检查前向±90° 最近距离
+    pnh.param("front_only", front_only_, false);  // when true, only check the front ±90° nearest distance
 
     scan_sub_ = nh.subscribe("/scan", 1, &SafetyNode::scanCb, this);
     cmd_sub_ = nh.subscribe("/cmd_vel_planner", 1, &SafetyNode::cmdCb, this);
@@ -84,7 +84,7 @@ class SafetyNode {
       if (!std::isfinite(r)) continue;
       if (front_only_) {
         double a = scan_->angle_min + static_cast<double>(i) * scan_->angle_increment;
-        if (std::fabs(a) > M_PI / 2.0) continue;  // 仅前向±90°（激光系）
+        if (std::fabs(a) > M_PI / 2.0) continue;  // only front ±90° (laser frame)
       }
       mn = std::min(mn, static_cast<double>(r));
     }

@@ -14,8 +14,8 @@ class TrtLogger : public nvinfer1::ILogger {
   void log(Severity severity, const char* msg) noexcept override;
 };
 
-/// 固定输入/输出的 TensorRT 引擎封装（obs/action 元素数由引擎绑定维度决定）。
-/// N=1 模型: [1,105] -> [1,2]；N=5 模型: [1,113] -> [1,10]（μ，机器人侧需 clip 到 [-1,1] 再映射速度）。
+/// Fixed input/output TensorRT engine wrapper (obs/action element counts determined by the engine binding dims).
+/// N=1 model: [1,105] -> [1,2]; N=5 model: [1,113] -> [1,10] (μ, needs clipping to [-1,1] robot-side before velocity mapping).
 class TrtEngine {
  public:
   TrtEngine() = default;
@@ -23,10 +23,10 @@ class TrtEngine {
   TrtEngine(const TrtEngine&) = delete;
   TrtEngine& operator=(const TrtEngine&) = delete;
 
-  /// 从 .engine 文件反序列化并分配 CUDA buffer。
+  /// Deserialize from a .engine file and allocate the CUDA buffers.
   bool load(const std::string& engine_path);
 
-  /// 同步推理: obs(输入维度) -> action(输出维度)。
+  /// Synchronous inference: obs(input dims) -> action(output dims).
   bool forward(const std::vector<float>& obs, std::vector<float>& action) const;
 
   int inputDim() const { return input_dim_; }

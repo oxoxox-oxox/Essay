@@ -24,8 +24,8 @@ wheels/
 .venv/
 venv/
 ENV/
-# 注意：gitignore 不支持行尾注释；下面这行必须单独成行。
-# Windows 大小写不敏感：ENV/ 会误忽略本项目 env/ 源码目录（env/ppo_gym.py 等），用 !env/ 重新包含。
+# Note: gitignore does not support end-of-line comments; the following line must be on its own.
+# Windows is case-insensitive: ENV/ would wrongly ignore this project's env/ source directory (env/ppo_gym.py etc.), so re-include it with !env/.
 !env/
 *.env
 

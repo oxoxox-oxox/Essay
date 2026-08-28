@@ -8,7 +8,7 @@ namespace ppo_nav {
 ObsBuilder::ObsBuilder(const PlannerParams& params) : p_(params) {
   target_angles_.reserve(p_.num_beams);
   for (int k = 0; k < p_.num_beams; ++k) {
-    // ir-sim: angle_list = linspace(-pi/2, pi/2, number) -> 步长 2*pi/2/(number-1)
+    // ir-sim: angle_list = linspace(-pi/2, pi/2, number) -> step 2*pi/2/(number-1)
     double t = -p_.half_fov_rad + 2.0 * p_.half_fov_rad * k / (p_.num_beams - 1);
     target_angles_.push_back(t);
   }
@@ -24,22 +24,22 @@ void ObsBuilder::buildLidar(const sensor_msgs::LaserScan& scan, std::vector<floa
   const double amin = scan.angle_min;
   std::vector<double> ang(n), rng(n);
   for (size_t i = 0; i < n; ++i) {
-    // reverse_scan: 驱动输出反序时，物理角度按 (n-1-i) 递增
+    // reverse_scan: when the driver output is reversed, the physical angle increases as (n-1-i)
     double la = amin + (p_.reverse_scan ? static_cast<double>(n - 1 - i)
                                         : static_cast<double>(i)) * inc;
-    ang[i] = wrapAngle(la + p_.laser_yaw_in_base);  // 激光系 -> base_link 系
+    ang[i] = wrapAngle(la + p_.laser_yaw_in_base);  // laser frame -> base_link frame
 
     const float r = scan.ranges[i];
     double rv;
     if (!std::isfinite(r) || r > p_.range_max_norm) {
-      rv = p_.range_max_norm;  // 无回波/超量程 -> 视为无障碍(1.0)
+      rv = p_.range_max_norm;  // no echo/out of range -> treat as unobstructed (1.0)
     } else {
       rv = std::max(static_cast<double>(r), 0.0);
     }
     rng[i] = std::min(rv, p_.range_max_norm) / p_.range_max_norm;
   }
 
-  // 每个目标角最近邻取原始束（训练 max_bins=num_beams=100 -> 分箱恒等，等价逐束）
+  // nearest-neighbor take of raw beams per target angle (training max_bins=num_beams=100 -> binning is identity, equivalent to per-beam)
   for (int k = 0; k < p_.num_beams; ++k) {
     const double t = target_angles_[k];
     double best_d = 1e9;
@@ -62,7 +62,7 @@ void ObsBuilder::buildGoal(double rx, double ry, double ryaw, std::vector<float>
   const double dy = goal_.y - ry;
   const double dist = std::hypot(dx, dy);
   const double angle = wrapAngle(std::atan2(dy, dx) - ryaw);
-  out[0] = static_cast<float>(dist / p_.goal_dist_norm);  // 与训练一致：/goal_dist_norm(10)
+  out[0] = static_cast<float>(dist / p_.goal_dist_norm);  // consistent with training: /goal_dist_norm(10)
   out[1] = static_cast<float>(std::cos(angle));
   out[2] = static_cast<float>(std::sin(angle));
 }

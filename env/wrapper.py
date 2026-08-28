@@ -1,22 +1,22 @@
-"""ir-sim 环境封装：把 world YAML 变成 RL 训练/评估可用的接口。
+"""ir-sim env wrapper: turns a world YAML into an RL training/eval interface.
 
-观测 (obs, float32 向量)，输入仿照 DRL-robot-navigation-IR-SIM 的 prepare_state：
-    [lidar 分箱 min 值 / range_max (max_bins,),
+Observation (obs, float32 vector), input modeled on prepare_state from DRL-robot-navigation-IR-SIM:
+    [lidar binned-min values / range_max (max_bins,),
      dist / goal_dist_norm, cos, sin,
-     上一 chunk 动作归一化 (action_dim*prev_chunk_size,)（可选）]
-动作 (numpy, (action_dim,)):
-    归一化到 [-1,1] 网络输出，内部映射回真实速度范围 [vel_min, vel_max]
-    （diff 机器人: [linear_vel, angular_vel]）。
+     previous chunk action normalized (action_dim*prev_chunk_size,) (optional)]
+Action (numpy, (action_dim,)):
+    normalized to [-1,1] network output, internally mapped back to the real velocity range [vel_min, vel_max]
+    (diff-drive robot: [linear_vel, angular_vel]).
 
-lidar 分箱（对齐 DRL prepare_state）:
-    - bin_size = ceil(lidar_len / max_bins)，每箱取 min 值再 / range_max。
-    - max_bins = lidar_len 时 bin_size=1，等价于逐束 / range_max。
+lidar binning (aligned with DRL prepare_state):
+    - bin_size = ceil(lidar_len / max_bins), take the min value per bin then / range_max.
+    - when max_bins = lidar_len, bin_size=1, equivalent to per-beam / range_max.
 
-上一 chunk 动作（action chunk 适配版）:
-    - 在 chunk 模式下模型每个决策点（每 N 步）跑一次，观测中编码
-      "刚刚执行的那一个 chunk"，而不是单步的上一动作。
-    - 逐维按 DRL 归一化：每步 [lin*2, (ang+1)/2]。
-    - episode 起点用全零；chunk 中途提前结束(done)时用零补齐到定长。
+Previous chunk action (action-chunk adapted version):
+    - in chunk mode the model runs once per decision point (every N steps), and the observation encodes
+      "the chunk that was just executed", rather than the previous single-step action.
+    - per-dim DRL normalization: each step [lin*2, (ang+1)/2].
+    - episode start uses all zeros; when the chunk ends early (done), pad with zeros to a fixed length.
 """
 
 from __future__ import annotations
@@ -24,10 +24,11 @@ from __future__ import annotations
 import os
 import sys
 
-# irsim 在 import 时会显式 matplotlib.use("TkAgg"/"Qt5Agg")（irsim.env.env_base 的
-# BACKEND_PREFERENCES），headless 服务器上会打印一堆 "Failed to use ... backend" 告警
-# 后才回退 Agg（MPLBACKEND 环境变量对显式 use() 无效）。这里在 irsim 之前拦截
-# matplotlib.use：GUI 后端加载失败时静默回退 Agg；桌面/Windows 环境 use 成功，行为不变。
+# irsim calls matplotlib.use("TkAgg"/"Qt5Agg") explicitly at import time (BACKEND_PREFERENCES in
+# irsim.env.env_base); on headless servers it prints a bunch of "Failed to use ... backend" warnings
+# before falling back to Agg (the MPLBACKEND env var does not affect an explicit use()). Here we intercept
+# matplotlib.use before irsim: silently fall back to Agg when the GUI backend fails to load; on desktop/Windows
+# the use() succeeds and behavior is unchanged.
 if "matplotlib" not in sys.modules:
     try:
         import matplotlib as _mpl
@@ -52,16 +53,16 @@ from .reward import RewardFn, wrap_angle
 
 
 class IrSimEnv:
-    """包装 :class:`irsim.env.EnvBase` 为 RL 环境。
+    """Wrap :class:`irsim.env.EnvBase` as an RL environment.
 
     Args:
-        world_name: 世界 YAML 路径（绝对或相对仓库根目录）。
-        reward_cfg: reward 配置段。
-        obs_cfg: obs 配置段（lidar_range_max 等）。
-        env_cfg: env 配置段（random_start / start_range / fixed_goal 等）。
-        seed: ir-sim 随机种子。
-        display: 是否显示可视化（训练时 False）。
-        log_level: ir-sim 日志级别。
+        world_name: world YAML path (absolute or relative to the repo root).
+        reward_cfg: reward config section.
+        obs_cfg: obs config section (lidar_range_max etc.).
+        env_cfg: env config section (random_start / start_range / fixed_goal etc.).
+        seed: ir-sim random seed.
+        display: whether to show visualization (False during training).
+        log_level: ir-sim log level.
     """
 
     def __init__(
@@ -82,8 +83,8 @@ class IrSimEnv:
             seed=seed,
         )
 
-        # 覆盖仿真步长（env_cfg.step_time，如 0.0833 对齐 12Hz 真机帧率）。
-        # ir-sim 物理积分用 _world_param.step_time，时钟/显示用 _world.step_time，两处都要改。
+        # Override the simulation step (env_cfg.step_time, e.g. 0.0833 to match the real 12Hz lidar frame rate).
+        # ir-sim physics integration uses _world_param.step_time, while clock/display use _world.step_time; both must be changed.
         env_cfg = env_cfg or {}
         if env_cfg.get("step_time") is not None:
             st = float(env_cfg["step_time"])
@@ -133,7 +134,7 @@ class IrSimEnv:
 
     @property
     def robot(self):
-        """当前机器人对象（reset(random=True) 后对象会被重建，须动态获取）。"""
+        """The current robot object (rebuilt after reset(random=True); must be fetched dynamically)."""
         return self._env.robot
 
     @property
@@ -141,7 +142,7 @@ class IrSimEnv:
         return self._env
 
     # ------------------------------------------------------------------ #
-    # 内部状态/观测读取
+    # Internal state/observation reads
     # ------------------------------------------------------------------ #
     def _dist_to_goal(self) -> float:
         state = np.squeeze(np.asarray(self._env.get_robot_state(), dtype=np.float64))
@@ -170,13 +171,13 @@ class IrSimEnv:
         )[: self.goal_dim]
 
     def _bin_lidar(self, ranges: np.ndarray) -> np.ndarray:
-        """DRL 式 lidar 分箱：每 bin_size 束取 min 值再 / range_max。
+        """DRL-style lidar binning: take the min per bin_size beams then / range_max.
 
         Args:
-            ranges: 原始 lidar ranges（inf 视为 range_max）。
+            ranges: raw lidar ranges (inf treated as range_max).
 
         Returns:
-            (max_bins,) float32，值在 [0, 1]。
+            (max_bins,) float32, values in [0, 1].
         """
         ranges = np.where(np.isinf(ranges), self.lidar_range_max, ranges)
         ranges = np.clip(ranges, 0.0, self.lidar_range_max)
@@ -185,7 +186,7 @@ class IrSimEnv:
         for i in range(0, len(ranges), bin_size):
             bin = ranges[i : i + min(bin_size, len(ranges) - i)]
             min_values.append(min(bin))
-        # 补齐到 max_bins（lidar_len 不是 max_bins 整数倍时尾部补满量程=无遮挡）
+        # Pad to max_bins (if lidar_len is not an integer multiple of max_bins, fill the tail with full range = unobstructed)
         while len(min_values) < self.max_bins:
             min_values.append(self.lidar_range_max)
         return (np.asarray(min_values, dtype=np.float32) / self.lidar_range_max)[: self.max_bins]
@@ -200,9 +201,9 @@ class IrSimEnv:
         return np.concatenate(obs).astype(np.float32)
 
     def _set_prev_chunk(self, executed: np.ndarray) -> None:
-        """把刚执行完的动作（可能被截断）定长化为上一 chunk 观测。
+        """Fixed-length encode the just-executed actions (possibly truncated) as the previous-chunk observation.
 
-        逐维按 DRL 归一化：每步 [lin*2, (ang+1)/2]（action 已归一化 [-1,1]）。
+        Per-dim DRL normalization: each step [lin*2, (ang+1)/2] (action already normalized to [-1,1]).
         """
         if not self.include_prev_action:
             return
@@ -223,21 +224,22 @@ class IrSimEnv:
         return collision, arrive
 
     # ------------------------------------------------------------------ #
-    # 动作映射
+    # Action mapping
     # ------------------------------------------------------------------ #
     def scale_action(self, action_norm: np.ndarray) -> np.ndarray:
-        """网络输出 [-1,1] -> 真实速度。"""
+        """Network output [-1,1] -> real velocity."""
         a = np.clip(np.asarray(action_norm, dtype=np.float64), -1.0, 1.0)
         return self.vel_min + (a + 1.0) / 2.0 * (self.vel_max - self.vel_min)
 
     # ------------------------------------------------------------------ #
-    # RL 接口
+    # RL interface
     # ------------------------------------------------------------------ #
     def _maybe_randomize_start(self) -> None:
-        """随机机器人初始位置（保持 goal 固定）。
+        """Randomize the robot's initial pose (keep the goal fixed).
 
-        在 reset(random=True) 重建场景后调用：重采样一个不与障碍重叠的
-        起点，并把 goal 固定在配置值（世界 YAML 里的 goal 也可保持固定）。
+        Called after reset(random=True) rebuilds the scene: resample a start pose
+        that does not overlap any obstacle, and pin the goal to the configured value
+        (the world YAML's goal can also stay fixed).
         """
         if not self.random_start:
             return
@@ -252,7 +254,7 @@ class IrSimEnv:
         self._env.refresh()
 
     def reset(self, random: bool = True) -> np.ndarray:
-        """重置环境并返回初始观测（上一 chunk 动作清零）。"""
+        """Reset the environment and return the initial observation (previous chunk action zeroed)."""
         self._env.reset(random=random)
         self._maybe_randomize_start()
         self.step_count = 0
@@ -262,13 +264,13 @@ class IrSimEnv:
         return self._get_obs()
 
     def step_single(self, action_norm: np.ndarray) -> tuple[np.ndarray, float, bool, dict]:
-        """执行单个控制步。
+        """Execute a single control step.
 
         Args:
-            action_norm: 归一化动作 (action_dim,)。
+            action_norm: normalized action (action_dim,).
 
         Returns:
-            (obs, reward, done, info) 与 gym 一致。
+            (obs, reward, done, info) consistent with gym.
         """
         action = self.scale_action(action_norm)
         self._env.step(np.asarray(action, dtype=np.float64).reshape(-1, 1), action_id=0)
@@ -306,15 +308,15 @@ class IrSimEnv:
     def step_chunk(
         self, actions: np.ndarray, gamma: float = 0.99
     ) -> tuple[np.ndarray, float, bool, dict]:
-        """开环执行一个动作 chunk（长度 N）。
+        """Execute an action chunk open-loop (length N).
 
         Args:
-            actions: 归一化动作数组 (N, action_dim)。
-            gamma: 用于 chunk 内折现求和。
+            actions: normalized action array (N, action_dim).
+            gamma: discount factor for the within-chunk sum.
 
         Returns:
-            (next_obs, discounted_chunk_reward, done, info)。
-            若 chunk 中途 done（到达/碰撞/超时），提前截断。
+            (next_obs, discounted_chunk_reward, done, info).
+            Truncates early if done occurs mid-chunk (reached/collision/timeout).
         """
         rewards: list[float] = []
         info: dict = {}
@@ -329,17 +331,17 @@ class IrSimEnv:
         chunk_reward = sum(
             (gamma**k) * r for k, r in enumerate(rewards)
         )
-        # 决策点观测：状态为 chunk 末态，上一 chunk 动作为刚执行的动作
+        # Decision-point observation: state is the chunk final state, previous chunk action is the just-executed action
         self._set_prev_chunk(executed)
         obs = self._get_obs()
         return obs, float(chunk_reward), done, info
 
     def close(self) -> None:
-        """关闭环境并释放其 matplotlib figure。
+        """Close the environment and release its matplotlib figure.
 
-        注意: ``EnvBase.end()`` 在 ``disable_all_plot=True``（headless 训练）时
-        会提前返回，不会执行 ``plt.close``，导致 figure 只增不减（>20 个就报警）。
-        这里补一次针对本环境 figure 的显式关闭。
+        Note: ``EnvBase.end()`` returns early when ``disable_all_plot=True`` (headless training)
+        without calling ``plt.close``, so figures only accumulate (a warning triggers above 20).
+        Here we add one explicit close targeting this environment's figure.
         """
         try:
             self._env.close()

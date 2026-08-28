@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""真机消融测量节点（独立 rospy 脚本，不依赖 catkin 编译）。
+"""Real-robot ablation measurement node (standalone rospy script, no catkin build needed).
 
-记录/统计：
-  - scan->决策 总延时（/planner/scan_age_ms，planner 每个推理 tick 发布）
-  - 单次推理耗时（/planner/fwd_ms，量化直接作用项）
-  - 推理频率（scan_age 消息数 / 时长）
-  - 动作下发频率（/cmd_vel_planner 消息数 / 时长）
-  - 安全急停计数（/cmd_vel_planner 非零但 /cmd_vel 被 safety 归零）
+Records / computes:
+  - scan->decision total latency (/planner/scan_age_ms, published by the planner on every inference tick)
+  - single inference time (/planner/fwd_ms, the item quantization acts on directly)
+  - inference frequency (scan_age message count / duration)
+  - action publish frequency (/cmd_vel_planner message count / duration)
+  - safety emergency-stop count (/cmd_vel_planner nonzero but /cmd_vel zeroed by safety)
 
-用法（真机）:
+Usage (on robot):
     python3 measure_node.py _out:=/home/wheeltec/measure.csv
-  结果写 CSV（每行 t,kind,value_ms），退出时打印汇总。
+  Results written to CSV (each row t,kind,value_ms); prints a summary on exit.
 
-说明: GPU 占用不在这里测，用 tegrastats / nvtop 单独记录。
+Note: GPU usage is not measured here; record it separately with tegrastats / nvtop.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class MeasureNode:
         self.planner_active = abs(m.linear.x) > 1e-4 or abs(m.angular.z) > 1e-4
 
     def on_cmd_vel(self, m: Twist) -> None:
-        # safety 转发为 0 且 planner 有输出 -> 记一次急停
+        # safety forwarded 0 while the planner has output -> count one emergency-stop
         if self.planner_active and abs(m.linear.x) < 1e-4 and abs(m.angular.z) < 1e-4:
             self.n_stop += 1
             self.planner_active = False

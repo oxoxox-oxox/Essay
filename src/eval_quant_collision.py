@@ -1,15 +1,15 @@
-"""INT8 量化 vs FP32 的碰撞率对照实验（ir-sim 仿真）。
+"""INT8 quantization vs FP32 collision-rate comparison experiment (ir-sim simulation).
 
-目的（论文论点验证）：量化是否会减小机器人在导航中的碰撞率。
+Goal (validates the paper claim): does quantization change the robot's collision rate in navigation.
 
-方法：
-    1. 用 PTQ 把 PPO Actor 模拟成 INT8：用 export/ppo_mw/calib_obs.npz（256 条真实 obs）
-       校准每层激活/权重的对称 per-tensor scale，推理时 fake-quant（round/clip/dequant）。
-       纯 Gemm/Tanh MLP 与 TensorRT INT8 的量化语义一致（输出仍为 FP32 μ）。
-    2. 配对对照：对同一批随机起点（同一 seed），分别用 FP32 与 INT8 策略跑同一条
-       确定性轨迹（激光噪声关闭），统计 success/collision/timeout 与配对分歧表。
+Method:
+    1. Simulate the PPO Actor as INT8 with PTQ: calibrate per-layer symmetric per-tensor scales for
+       activations/weights using export/ppo_mw/calib_obs.npz (256 real obs), fake-quant (round/clip/dequant) at inference.
+       The pure Gemm/Tanh MLP matches TensorRT INT8 quantization semantics (output remains FP32 μ).
+    2. Paired comparison: for the same batch of random starts (same seed), run the same deterministic
+       trajectory (laser noise off) with FP32 and INT8 policies, counting success/collision/timeout and the paired divergence table.
 
-用法:
+Usage:
     d:\\anaconda\\envs\\rl_env\\python.exe src\\eval_quant_collision.py --episodes 300
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import argparse
 import os
 import sys
 
-# headless 服务器无 GUI：强制 matplotlib Agg 后端（本脚本恒为 headless）
+# headless server has no GUI: force the matplotlib Agg backend (this script is always headless)
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import numpy as np
@@ -34,15 +34,15 @@ from utils.config import load_config, resolve_path  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
-# 量化模拟（对称 per-tensor PTQ fake-quant）
+# Quantization simulation (symmetric per-tensor PTQ fake-quant)
 # --------------------------------------------------------------------------- #
 def fake_quant(x: torch.Tensor, scale: float) -> torch.Tensor:
-    """对称 INT8 量化 + 反量化（范围 [-127, 127]）。"""
+    """Symmetric INT8 quantization + dequantization (range [-127, 127])."""
     return torch.clamp(torch.round(x / scale), -127.0, 127.0) * scale
 
 
 class QuantActor:
-    """FP32 与 INT8 两个前向，共享同一份权重，仅激活/权重量化方式不同。"""
+    """Both FP32 and INT8 forwards, sharing the same weights; only the activation/weight quantization differs."""
 
     def __init__(self, policy_net, action_net, calib_obs: np.ndarray):
         self.l0: torch.nn.Linear = policy_net[0]   # 105 -> 1024
@@ -50,7 +50,7 @@ class QuantActor:
         self.l2: torch.nn.Linear = action_net      # 1024 -> 2
         self.calib = torch.from_numpy(calib_obs).float()
 
-        # 校准各层激活/权重 scale（symmetric, max_abs / 127）
+        # Calibrate per-layer activation/weight scales (symmetric, max_abs / 127)
         with torch.no_grad():
             x = self.calib
             self.a_scale0 = float(x.detach().abs().max() / 127.0)
@@ -78,7 +78,7 @@ class QuantActor:
             h = torch.tanh(F.linear(x, w, self.l1.bias))
             x = fake_quant(h, self.a_scale2)
             w = fake_quant(self.l2.weight, self.w_scale2)
-            return F.linear(x, w, self.l2.bias)  # 输出 μ 保持 FP32（与 TRT 输出一致）
+            return F.linear(x, w, self.l2.bias)  # output μ stays FP32 (consistent with TRT output)
 
     def scales(self) -> dict:
         return {
@@ -94,7 +94,7 @@ def cos(a: np.ndarray, b: np.ndarray) -> float:
 
 
 # --------------------------------------------------------------------------- #
-# 环境与轨迹
+# Environment and trajectories
 # --------------------------------------------------------------------------- #
 NOISELESS_WORLD = """\
 world:
@@ -194,10 +194,10 @@ def run_episode(env: IrSimEnv, policy_fn, start: list[float], max_steps: int):
 
 
 # --------------------------------------------------------------------------- #
-# 主流程
+# Main flow
 # --------------------------------------------------------------------------- #
 def main() -> None:
-    ap = argparse.ArgumentParser(description="INT8 量化 vs FP32 碰撞率对照（ir-sim）")
+    ap = argparse.ArgumentParser(description="INT8 quantization vs FP32 collision-rate comparison (ir-sim)")
     ap.add_argument("--checkpoint", default="checkpoints/ppo_mw_N1/best_model.zip")
     ap.add_argument("--calib", default="export/ppo_mw/calib_obs.npz")
     ap.add_argument("--config", default="configs/train.yaml")
@@ -210,14 +210,14 @@ def main() -> None:
     cfg = load_config(resolve_path(args.config))
     cfg["obs"]["prev_chunk_size"] = 1
 
-    # ---- 加载模型 + 校准量化 ----
+    # ---- Load model + calibrate quantization ----
     model = PPO.load(resolve_path(args.checkpoint), device="cpu")
     pol = model.policy
     pol.eval()
     calib_obs = np.load(resolve_path(args.calib))["obs"].astype(np.float32)
     actor = QuantActor(pol.mlp_extractor.policy_net, pol.action_net, calib_obs)
 
-    # 自检：我的 fp32 前向 == SB3 predict（确定性 μ 应 clip 后一致）
+    # Self-check: my fp32 forward == SB3 predict (deterministic μ should match after clipping)
     with torch.no_grad():
         x = torch.from_numpy(calib_obs[:8]).float()
         mine = actor.fp32(x).numpy()
@@ -225,17 +225,17 @@ def main() -> None:
     fp32_check = float(np.abs(np.clip(mine, -1, 1) - sb3_pred).max())
     print(f"[check] fp32 forward vs SB3 predict max-abs-diff = {fp32_check:.3e}")
 
-    # 输出一致性（校准集上 FP32 vs INT8）
+    # Output consistency (FP32 vs INT8 on the calibration set)
     with torch.no_grad():
         y32 = actor.fp32(torch.from_numpy(calib_obs).float()).numpy()
         y8 = actor.int8(torch.from_numpy(calib_obs).float()).numpy()
-    print("[quant] 校准集(256) FP32 vs INT8 输出:")
+    print("[quant] calibration set (256) FP32 vs INT8 output:")
     print(f"  max-abs-diff = {np.abs(y8 - y32).max():.5f}")
     print(f"  mean-abs-diff= {np.abs(y8 - y32).mean():.5f}")
     print(f"  cos          = {cos(y8, y32):.9f}")
     print(f"  scales(a0/a1/a2/w0/w1/w2) = {[round(v,5) for v in actor.scales().values()]}")
 
-    # ---- 环境（无噪声确定性 + 静态障碍）----
+    # ---- Environment (noise-free deterministic + static obstacles) ----
     os.makedirs(resolve_path(args.outdir), exist_ok=True)
     world_path = os.path.join(resolve_path(args.outdir), "eval_world_noiseless.yaml")
     with open(world_path, "w", encoding="utf-8") as f:
@@ -245,14 +245,14 @@ def main() -> None:
 
     outcomes = {"fp32": {"success": 0, "collision": 0, "timeout": 0},
                 "int8": {"success": 0, "collision": 0, "timeout": 0}}
-    # 配对分歧：key = (fp32_outcome, int8_outcome)
+    # Paired divergence: key = (fp32_outcome, int8_outcome)
     pairs = {}
-    diff_steps = 0  # 首步动作差累计（同 obs 下的量化扰动）
+    diff_steps = 0  # accumulated first-step action diff (quantization perturbation on the same obs)
 
     try:
         for ep in range(args.episodes):
             start = sample_start(env, rng)
-            # 首步动作差（同一 obs，量化唯一变量）
+            # first-step action diff (same obs, quantization is the only variable)
             env.reset(random=False)
             env.robot.set_state(start)
             env._env.refresh()
@@ -271,24 +271,24 @@ def main() -> None:
         env.close()
 
     n = args.episodes
-    print("\n===== 结果 =====")
+    print("\n===== Results =====")
     for k in ("fp32", "int8"):
         c = outcomes[k]
         print(f"[{k}] success={c['success']/n:.2%} collision={c['collision']/n:.2%} "
               f"timeout={c['timeout']/n:.2%} (n={n})")
 
-    print("\n配对分歧表 (fp32 -> int8):")
+    print("\nPaired divergence table (fp32 -> int8):")
     order = ["success", "collision", "timeout"]
     for o1 in order:
         row = "  ".join(f"{o2}:{pairs.get((o1, o2), 0)}" for o2 in order)
         print(f"  fp32={o1:<9} | {row}")
-    help_q = pairs.get(("collision", "success"), 0)   # 量化"救回"碰撞
-    hurt_q = pairs.get(("success", "collision"), 0)   # 量化"引入"碰撞
-    print(f"\n量化后碰撞->成功: {help_q} 集；量化后成功->碰撞: {hurt_q} 集")
-    print(f"净效应(碰撞减少为 +): {help_q - hurt_q} 集 / {n} 集")
-    print(f"平均首步 max-abs 动作扰动: {diff_steps / n:.5f}")
+    help_q = pairs.get(("collision", "success"), 0)   # quantization "rescued" from collision
+    hurt_q = pairs.get(("success", "collision"), 0)   # quantization "introduced" a collision
+    print(f"\ncollision->success after quantization: {help_q} eps; success->collision after quantization: {hurt_q} eps")
+    print(f"net effect (collision reduction = +): {help_q - hurt_q} eps / {n} eps")
+    print(f"mean first-step max-abs action perturbation: {diff_steps / n:.5f}")
 
-    # 存档
+    # Archive
     meta = {
         "checkpoint": args.checkpoint, "calib": args.calib, "episodes": n,
         "seed": args.seed, "fp32": outcomes["fp32"], "int8": outcomes["int8"],
@@ -303,20 +303,20 @@ def main() -> None:
              **{k: np.asarray(v) for k, v in meta.items()})
     md = os.path.join(resolve_path(args.outdir), "quant_collision_results.md")
     with open(md, "w", encoding="utf-8") as f:
-        f.write("# INT8 量化 vs FP32 碰撞率对照（ir-sim 仿真）\n\n")
-        f.write(f"- checkpoint: `{args.checkpoint}`\n- 校准集: `{args.calib}`\n")
-        f.write(f"- episodes: {n}（配对，同起点/无激光噪声/静态障碍 eval_world）\n\n")
-        f.write("## 输出一致性（校准集 256）\n\n")
+        f.write("# INT8 quantization vs FP32 collision-rate comparison (ir-sim simulation)\n\n")
+        f.write(f"- checkpoint: `{args.checkpoint}`\n- calibration set: `{args.calib}`\n")
+        f.write(f"- episodes: {n} (paired, same starts / no laser noise / static-obstacle eval_world)\n\n")
+        f.write("## Output Consistency (calibration set 256)\n\n")
         f.write(f"| max-abs-diff | mean-abs-diff | cos |\n|---|---|---|\n")
         f.write(f"| {np.abs(y8-y32).max():.5f} | {np.abs(y8-y32).mean():.5f} | {cos(y8,y32):.9f} |\n\n")
-        f.write("## 碰撞/成功率\n\n")
-        f.write("| 条件 | success | collision | timeout |\n|---|---|---|---|\n")
+        f.write("## Collision / Success Rate\n\n")
+        f.write("| Condition | success | collision | timeout |\n|---|---|---|---|\n")
         for k in ("fp32", "int8"):
             c = outcomes[k]
             f.write(f"| {k} | {c['success']/n:.2%} | {c['collision']/n:.2%} | {c['timeout']/n:.2%} |\n")
-        f.write(f"\n净效应(量化后 碰撞->成功 减 成功->碰撞): {help_q - hurt_q} 集 / {n} 集\n")
-        f.write(f"平均首步 max-abs 动作扰动: {diff_steps / n:.5f}\n")
-    print(f"\n存档: {md}")
+        f.write(f"\nNet effect (post-quantization, collision->success minus success->collision): {help_q - hurt_q} eps / {n} eps\n")
+        f.write(f"Mean first-step max-abs action perturbation: {diff_steps / n:.5f}\n")
+    print(f"\nArchived: {md}")
 
 
 if __name__ == "__main__":

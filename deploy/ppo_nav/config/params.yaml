@@ -1,44 +1,44 @@
-# PPO 部署参数（launch 里 <rosparam command="load"> 到全局命名空间）
+# PPO deployment parameters (loaded into the global namespace via <rosparam command="load"> in launch)
 
 planner:
-  goal_x: 5.0            # 目标点 x（odom_combined 系，相对起点）
-  goal_y: 5.0            # 目标点 y
-  # 决策由雷达帧驱动（收到新 /scan 就串行推理一次），不再用固定周期定时器。
-  # min_decision_period: 相邻两次决策的最小间隔（秒），0=纯雷达帧驱动（约 12Hz）。
-  #   训练 step_time=0.083s（1/12），帧驱动即 ≈12Hz，与训练一致，保持 0。
+  goal_x: 5.0            # goal x (odom_combined frame, relative to start)
+  goal_y: 5.0            # goal y
+  # Decisions are driven by the lidar frames (each new /scan triggers one serial inference), no fixed-period timer.
+  # min_decision_period: minimum interval between consecutive decisions (seconds); 0 = pure lidar-frame-driven (~12Hz).
+  #   Training step_time=0.083s (1/12), frame-driven ≈12Hz, consistent with training, keep 0.
   min_decision_period: 0.0
-  scan_timeout: 0.5      # scan 超过该时长视为超时 -> 停车
+  scan_timeout: 0.5      # stop the robot if no scan is received within this duration
   debug_log: false
 
-  # ---- 与训练侧对齐（一般不要动）----
-  num_beams: 100         # 训练 lidar 光束数
-  range_max_norm: 7.0    # lidar 归一化量程
-  goal_dist_norm: 10.0   # goal 距离归一化除数（训练 obs.goal_dist_norm）
-  half_fov_deg: 90.0     # 前向半视场
-  reverse_scan: false    # /scan 数组反序开关（现场校验后设置）
-  laser_yaw_fallback_deg: 180.0  # tf 查不到时的兜底 yaw(laser->base_link)
+  # ---- Aligned with the training side (usually do not change) ----
+  num_beams: 100         # training lidar beam count
+  range_max_norm: 7.0    # lidar normalization range
+  goal_dist_norm: 10.0   # divisor for normalizing goal distance (training obs.goal_dist_norm)
+  half_fov_deg: 90.0     # forward half field of view
+  reverse_scan: false    # /scan array reversal switch (set after on-site verification)
+  laser_yaw_fallback_deg: 180.0  # fallback yaw(laser->base_link) when tf lookup fails
 
   # ---- action chunking ----
-  # chunk_size: N=1 模型用 1（obs 105）；N=5 模型用 5（obs 113，引擎输出 10 维）。
+  # chunk_size: use 1 for N=1 models (obs 105); use 5 for N=5 models (obs 113, engine output 10 dims).
   chunk_size: 1
 
-  # ---- 上一动作通道 ----
-  # ⚠️ N=1 模型训练时 prev 恒 0 -> false；N=5 模型用了 prev 通道 -> 必须 true。
-  #    与所用模型严格匹配（见 runs/ablation_runbook.md 第 0 节）。
+  # ---- previous-action channel ----
+  # ⚠️ N=1 models have prev always 0 during training -> false; N=5 models use the prev channel -> must be true.
+  #    Must strictly match the model in use (see section 0 of runs/ablation_runbook.md).
   use_prev_action: false
 
-  # ---- 动作映射（μ clip 到 [-1,1] 后按此映射真实速度）----
-  vel_min: [-1.0, -1.0]  # 归一化动作 -> 真实速度 下限 [lin, ang]
-  vel_max: [1.0, 1.0]    # 上限 [lin, ang]（训练值）
-  max_linear: 0.8        # 下发限幅（真机安全上限，建议低速先试 0.3）
+  # ---- action mapping (real velocity from the clipped-to-[-1,1] μ) ----
+  vel_min: [-1.0, -1.0]  # normalized action -> real velocity lower bound [lin, ang]
+  vel_max: [1.0, 1.0]    # upper bound [lin, ang] (training values)
+  max_linear: 0.8        # command clamp (real-robot safety upper bound, try 0.3 low speed first)
   max_angular: 1.0
 
 safety:
-  stop_dist: 0.35        # 最近障碍 < 此值 -> 急停
-  slow_dist: 0.6         # < 此值 -> 按 slow_factor 减速
+  stop_dist: 0.35        # nearest obstacle < this -> emergency stop
+  slow_dist: 0.6         # < this -> slow down by slow_factor
   slow_factor: 0.4
-  min_voltage: 10.5      # 电量低于 -> 停车
-  watchdog_timeout: 0.6  # planner 输出超时 -> 停车
+  min_voltage: 10.5      # battery below this -> stop
+  watchdog_timeout: 0.6  # no planner output within this -> stop
   max_linear: 0.8
   max_angular: 1.0
-  front_only: false      # true 时只检查前向±90° 最近距离
+  front_only: false      # when true, only check the front ±90° nearest distance

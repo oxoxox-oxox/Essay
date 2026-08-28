@@ -1,7 +1,7 @@
-"""配置加载与路径解析。
+"""Config loading and path resolution.
 
-约定：configs/train.yaml 所在目录为 project root（仓库根目录），
-所有相对路径（world_name、run_dir 等）均相对该 root 解析。
+Convention: the directory containing configs/train.yaml is the project root (repo root);
+all relative paths (world_name, run_dir, etc.) are resolved relative to that root.
 """
 
 from __future__ import annotations
@@ -15,13 +15,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def load_config(path: str) -> dict:
-    """加载 YAML 配置并深拷贝，避免脚本间共享可变 dict。"""
+    """Load a YAML config and deep-copy it, avoiding shared mutable dicts across scripts."""
     with open(path, "r", encoding="utf-8") as f:
         return copy.deepcopy(yaml.safe_load(f))
 
 
 def deep_update(base: dict, override: dict) -> dict:
-    """递归合并 override 到 base 的深拷贝上（override 优先）。"""
+    """Recursively merge override into a deep copy of base (override takes precedence)."""
     out = copy.deepcopy(base)
     for key, value in (override or {}).items():
         if isinstance(value, dict) and isinstance(out.get(key), dict):
@@ -32,7 +32,7 @@ def deep_update(base: dict, override: dict) -> dict:
 
 
 def resolve_path(path: str) -> str:
-    """把相对路径解析到 project root，绝对路径保持不变。"""
+    """Resolve a relative path against the project root; absolute paths are left unchanged."""
     if os.path.isabs(path):
         return path
     return os.path.join(PROJECT_ROOT, path)

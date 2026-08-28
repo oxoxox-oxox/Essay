@@ -1,17 +1,18 @@
-"""SB3 PPO 单步（N=1）训练脚本（ir-sim 环境）。
+"""SB3 PPO single-step (N=1) training script (ir-sim env).
 
-与 src/eval_ppo.py 分离：本文件只负责训练（含训练期 EvalCallback 的周期评估
-与 best_model 保存）；训练结束后的详细评估请用 src/eval_ppo.py。
+Separated from src/eval_ppo.py: this file only does training (including the
+periodic eval by EvalCallback during training and best_model saving);
+use src/eval_ppo.py for the detailed evaluation after training.
 
-用法:
-    python src/train_ppo.py --steps 300000 --device cuda   # 完整训练
-    python src/train_ppo.py --steps 20000 --device cpu      # 冒烟测试
+Usage:
+    python src/train_ppo.py --steps 300000 --device cuda   # full training
+    python src/train_ppo.py --steps 20000 --device cpu      # smoke test
 
-产物:
-    checkpoints/{name}_N1/best_model.zip   # EvalCallback 保存的评估最优
-    checkpoints/{name}_N1/ppo_model.zip    # 训练结束最终模型
-    runs/{name}_N1/evaluations.npz         # 评估曲线（eval/success_rate 等）
-    runs/{name}_N1/tensorboard/            # TB 日志
+Artifacts:
+    checkpoints/{name}_N1/best_model.zip   # eval-best saved by EvalCallback
+    checkpoints/{name}_N1/ppo_model.zip    # final model at the end of training
+    runs/{name}_N1/evaluations.npz         # eval curve (eval/success_rate etc.)
+    runs/{name}_N1/tensorboard/            # TB logs
 """
 
 from __future__ import annotations
@@ -20,8 +21,8 @@ import argparse
 import os
 import sys
 
-# headless 服务器无 GUI：强制 matplotlib Agg 后端（避免 TkAgg/Qt5Agg 加载失败告警刷屏）。
-# 训练恒为 headless（display=False），此处无条件设置；若外部已设 MPLBACKEND 环境变量则尊重它。
+# headless servers have no GUI: force the matplotlib Agg backend (avoids TkAgg/Qt5Agg load-failure warning spam).
+# Training is always headless (display=False), set unconditionally here; respect MPLBACKEND if externally set.
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import numpy as np
@@ -40,12 +41,13 @@ from utils.config import deep_update, load_config, resolve_path  # noqa: E402
 
 
 class SuccessRateEvalCallback(EvalCallback):
-    """按 eval 成功率（而非 mean reward）选 best_model 的 EvalCallback。
+    """EvalCallback that selects best_model by eval success rate (not mean reward).
 
-    本任务的奖励含 goal shaping，坏模型会在 episode 里徘徊刷 shaping 奖励，
-    导致 mean reward 与 success 反相关（reward 高但 success 低甚至 0%）。
-    SB3 默认按 mean reward 存 best_model 会选错，这里改成按 success_rate 选，
-    success 相同时用 mean_reward 做 tie-break。
+    The reward here includes goal shaping, so a bad model may loiter in episodes
+    farming shaping reward, making mean reward anti-correlated with success
+    (high reward but low or even 0% success). SB3's default best_model selection
+    by mean reward picks wrong models; this one selects by success_rate,
+    using mean_reward as a tie-break when success is equal.
     """
 
     def __init__(self, *args, **kwargs):
@@ -126,7 +128,7 @@ class SuccessRateEvalCallback(EvalCallback):
             self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
             self.logger.dump(self.num_timesteps)
 
-            # 关键改动：按 success_rate 选 best（success 相同时用 mean_reward 做 tie-break）
+            # Key change: select best by success_rate (mean_reward as tie-break when success is equal)
             is_best = success_rate > self.best_success_rate or (
                 success_rate == self.best_success_rate
                 and mean_reward > self.best_mean_reward
@@ -150,16 +152,16 @@ class SuccessRateEvalCallback(EvalCallback):
 
 
 def make_env(cfg: dict, world_key: str, seed: int, display: bool = False):
-    """返回一个构建 PPOGymEnv（外裹 Monitor）的工厂（DummyVecEnv 用）。
+    """Return a factory that builds a PPOGymEnv (wrapped in Monitor) for DummyVecEnv.
 
-    Monitor 用途：
-        1) 消除 evaluate_policy 的 "not wrapped with Monitor" 告警；
-        2) 训练期 TensorBoard 记录 rollout/ep_rew_mean / ep_len_mean。
-    本仓库环境链无任何修改 reward 的 wrapper，Monitor 不改变训练语义。
+    Monitor purpose:
+        1) removes the "not wrapped with Monitor" warning from evaluate_policy;
+        2) records rollout/ep_rew_mean / ep_len_mean in TensorBoard during training.
+    The env chain here has no reward-modifying wrapper, so Monitor does not change training semantics.
 
-    训练环境（world_key="world_name"）：若配置了 env.worlds 则用多世界包装
-    （每次 reset 随机换世界、单活跃场景，规避 ir-sim 全局状态冲突），
-    否则用单个 world_name。评估环境（world_key="eval_world"）恒为单世界。
+    Training env (world_key="world_name"): if env.worlds is configured, use the multi-world wrapper
+    (random world per reset, single active scene, avoiding ir-sim global-state conflicts),
+    otherwise use the single world_name. The eval env (world_key="eval_world") is always single-world.
     """
 
     def _factory():
@@ -192,34 +194,34 @@ def make_env(cfg: dict, world_key: str, seed: int, display: bool = False):
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="SB3 PPO 单步基线训练（评估请用 src/eval_ppo.py）"
+        description="SB3 PPO single-step baseline training (evaluate with src/eval_ppo.py)"
     )
     ap.add_argument("--config", default="configs/train.yaml")
     ap.add_argument("--name", default="ppo")
-    ap.add_argument("--steps", type=int, default=300_000, help="总环境步数")
+    ap.add_argument("--steps", type=int, default=300_000, help="total env steps")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
-    ap.add_argument("--eval-freq", type=int, default=20_000, help="训练期评估间隔（环境步）")
-    ap.add_argument("--eval-episodes", type=int, default=10, help="训练期每次评估的 episode 数")
+    ap.add_argument("--eval-freq", type=int, default=20_000, help="training-time eval interval (env steps)")
+    ap.add_argument("--eval-episodes", type=int, default=10, help="episodes per training-time eval")
     ap.add_argument("--hidden", type=str, default=None,
-                    help="覆盖隐藏层，如 '1024,1024'（默认取 config model.hidden1/2）")
+                    help="override hidden layers, e.g. '1024,1024' (default from config model.hidden1/2)")
     ap.add_argument("--worlds", type=str, default=None,
-                    help="多世界训练列表（逗号分隔的世界 YAML 路径，覆盖 configs/train.yaml 的 env.worlds；"
-                         "不传则用 config 里的 env.worlds，配置为空则单世界训练）")
+                    help="multi-world training list (comma-separated world YAML paths, overrides env.worlds in configs/train.yaml; "
+                         "if not given, uses the config's env.worlds, and single-world training when the config is empty)")
     ap.add_argument("--chunk", type=int, default=None,
-                    help="action chunk 长度 N（默认取 config chunk.size；1=单步，5=一次输出 5 步）")
+                    help="action chunk length N (default from config chunk.size; 1=single-step, 5=output 5 steps at once)")
     ap.add_argument("--ent-coef", type=float, default=0.0,
-                    help="PPO 熵正则系数（默认 0.0；熵坍缩时试 0.01）")
+                    help="PPO entropy regularization coefficient (default 0.0; try 0.01 on entropy collapse)")
     ap.add_argument("--n-steps", type=int, default=1024,
-                    help="PPO rollout 步数（默认 1024；83ms 步长下建议 4096 覆盖更多集）")
+                    help="PPO rollout steps (default 1024; with the 83ms step size, 4096 is recommended to cover more episodes)")
     args = ap.parse_args()
 
     cfg = load_config(resolve_path(args.config))
-    # action chunk 长度 N：网络动作空间 = N*action_dim；obs 上一动作通道 = N*action_dim
+    # action chunk length N: network action space = N*action_dim; obs prev-action channel = N*action_dim
     chunk_size = args.chunk if args.chunk is not None else int(cfg["chunk"].get("size", 1))
     cfg = deep_update(cfg, {"obs": {"prev_chunk_size": chunk_size}, "chunk": {"size": chunk_size}})
     if args.worlds:
-        # --worlds 覆盖 config 的 env.worlds（多世界训练）
+        # --worlds overrides the config's env.worlds (multi-world training)
         cfg = deep_update(cfg, {"env": {"worlds": [w.strip() for w in args.worlds.split(",")]}})
 
     if args.hidden:
@@ -275,7 +277,7 @@ def main() -> None:
     final_path = os.path.join(checkpoint_dir, "ppo_model.zip")
     model.save(final_path)
     print(f"[ppo] final model saved: {final_path}")
-    print(f"[ppo] 训练完成。详细评估请运行: "
+    print(f"[ppo] training finished. For detailed evaluation run: "
           f"python src/eval_ppo.py --checkpoint {final_path}")
 
 

@@ -1,32 +1,32 @@
-/// PPO (TensorRT) 导航规划节点。
+/// PPO (TensorRT) navigation planner node.
 ///
-/// 数据流:
+/// Data flow:
 ///   /scan + /odom + rosparam goal -> obs[1, 100+3+N*2] -> TensorRT engine -> /cmd_vel_planner
 ///
-/// 动作: PPO 单步（chunk_size=1）或 action chunk（chunk_size=5）。引擎输出 μ，
-///   长度 = chunk_size*2（每步 [lin,ang]）；节点 clip 到 [-1,1] 后按 scale_action
-///   映射到真实速度并限幅下发。
+/// Action: PPO single-step (chunk_size=1) or action chunk (chunk_size=5). The engine outputs μ,
+///   length = chunk_size*2 (per step [lin,ang]); the node clips to [-1,1], then maps through scale_action
+///   to real velocity and clamps before publishing.
 ///
-/// 触发机制（事件驱动，非固定周期定时器）:
-///   收到一帧"比上次已处理更新的" /scan -> 取最新 scan/odom -> 推理 -> 下发 ->
-///   立即等下一帧新 scan 再推理，如此往复。模型每帧雷达只串行跑一次，
-///   决策频率 = 雷达帧率（LSLIDAR 典型 12Hz，83ms）。
-///   chunk_size>1 时：一次推理产出 N 步动作塞入 pending_，其后 N-1 帧只弹出动作、
-///   不重新推理（开环），推理频率降为 1/N。
+/// Trigger mechanism (event-driven, not a fixed-period timer):
+///   on a new /scan newer than the last processed one -> take the latest scan/odom -> infer -> publish ->
+///   immediately wait for the next new scan and infer again, repeating. The model runs once serially per lidar frame,
+///   decision frequency = lidar frame rate (LSLIDAR typically 12Hz, 83ms).
+///   with chunk_size>1: one inference produces N steps pushed into pending_, the next N-1 frames only pop actions,
+///   without re-inferring (open-loop), cutting inference frequency to 1/N.
 ///
-/// 话题:
-///   订阅: /scan (sensor_msgs/LaserScan), /odom (nav_msgs/Odometry)
-///   发布: /cmd_vel_planner (geometry_msgs/Twist)  <- 由 safety_node 校验后转发到真机 /cmd_vel
-///         /planner/scan_age_ms (std_msgs/Float32)  <- scan->决策 总延时（测量用）
-///         /planner/fwd_ms     (std_msgs/Float32)  <- 单次推理耗时（量化直接作用项）
+/// Topics:
+///   subscribe: /scan (sensor_msgs/LaserScan), /odom (nav_msgs/Odometry)
+///   publish: /cmd_vel_planner (geometry_msgs/Twist)  <- validated by safety_node then forwarded to the real /cmd_vel
+///            /planner/scan_age_ms (std_msgs/Float32)  <- total scan->decision latency (for measurement)
+///            /planner/fwd_ms     (std_msgs/Float32)  <- single inference time (the item quantization acts on directly)
 ///
-/// obs 布局与训练侧 env/wrapper.py 完全一致（见 include/ppo_nav/obs_builder.hpp）。
-/// ⚠️ chunk=1（N=1 模型）训练时"上一动作"通道恒为 0 -> use_prev_action=false；
-///    chunk=5（N=5 模型）训练时 obs 含上一 chunk 的 5 步动作 -> use_prev_action=true。
-///    两者必须与所用模型严格匹配。
+/// The obs layout is exactly the training side's env/wrapper.py (see include/ppo_nav/obs_builder.hpp).
+/// ⚠️ with chunk=1 (N=1 model) the "previous action" channel is always 0 during training -> use_prev_action=false;
+///    with chunk=5 (N=5 model) obs includes the previous chunk's 5 actions -> use_prev_action=true.
+///    Both must strictly match the model in use.
 ///
-/// ⚠️ 时序口径: 训练 step_time=0.083s（1/12，对齐真机 12Hz 雷达帧率）。本节点帧驱动
-///    即 ≈12Hz，与训练一致；N=5 的开环窗口 ≈ 5×83ms = 0.42s。
+/// ⚠️ Timing convention: training step_time=0.083s (1/12, matching the real 12Hz lidar frame rate). This node is frame-driven
+///    so it is ≈12Hz, consistent with training; the N=5 open-loop window ≈ 5×83ms = 0.42s.
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
@@ -61,10 +61,10 @@ class PlannerNode {
     pnh.param("goal_x", goal_x_, 5.0);
     pnh.param("goal_y", goal_y_, 5.0);
     pnh.param("scan_timeout", scan_timeout_, 0.5);
-    pnh.param("min_decision_period", min_decision_period_, 0.0);  // 0=纯雷达帧驱动
+    pnh.param("min_decision_period", min_decision_period_, 0.0);  // 0=pure lidar-frame-driven
     pnh.param("debug_log", debug_log_, false);
 
-    // 与训练侧对齐的常量
+    // Constants aligned with the training side
     pnh.param("num_beams", params_.num_beams, 100);
     pnh.param("range_max_norm", params_.range_max_norm, 7.0);
     pnh.param("goal_dist_norm", params_.goal_dist_norm, 10.0);
@@ -75,14 +75,14 @@ class PlannerNode {
     pnh.param("laser_yaw_fallback_deg", laser_yaw_fallback_deg_, 180.0);
     params_.laser_yaw_in_base = laser_yaw_fallback_deg_ * M_PI / 180.0;
 
-    // action chunk 长度 N（决定 obs 维度与开环执行步数；PPO 当前固定 1）
+    // action chunk length N (determines the obs dim and open-loop execution steps; PPO currently fixed at 1)
     pnh.param("chunk_size", params_.chunk_size, 1);
     if (params_.chunk_size < 1) params_.chunk_size = 1;
 
-    // 上一动作是否写回 obs（当前 PPO 模型训练时恒 0，保持 false）
+    // whether to write the previous action back into obs (the current PPO model has it always 0 during training, keep false)
     pnh.param("use_prev_action", use_prev_action_, false);
 
-    // 归一化动作 -> 真实速度映射 + 下发限幅
+    // normalized action -> real velocity mapping + command clamps
     std::vector<double> vel_min{-1.0, -1.0}, vel_max{1.0, 1.0};
     pnh.getParam("vel_min", vel_min);
     pnh.getParam("vel_max", vel_max);
@@ -102,7 +102,7 @@ class PlannerNode {
     }
     const int expected_in = params_.num_beams + 3 + params_.prev_action_dim();
     if (engine_.inputDim() != expected_in) {
-      ROS_WARN("[planner] engine input=%d (expect %d for chunk=%d), 请核对模型与 obs 配置",
+      ROS_WARN("[planner] engine input=%d (expect %d for chunk=%d), check the model vs obs config",
                engine_.inputDim(), expected_in, params_.chunk_size);
     }
 
@@ -116,8 +116,8 @@ class PlannerNode {
     scan_sub_ = nh.subscribe("/scan", 1, &PlannerNode::scanCb, this);
     odom_sub_ = nh.subscribe("/odom", 1, &PlannerNode::odomCb, this);
     cmd_pub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel_planner", 1);
-    latency_pub_ = nh.advertise<std_msgs::Float32>("/planner/scan_age_ms", 10);  // scan->决策 总延时
-    fwd_pub_ = nh.advertise<std_msgs::Float32>("/planner/fwd_ms", 10);            // 单次推理耗时
+    latency_pub_ = nh.advertise<std_msgs::Float32>("/planner/scan_age_ms", 10);  // total scan->decision latency
+    fwd_pub_ = nh.advertise<std_msgs::Float32>("/planner/fwd_ms", 10);            // single inference time
 
     worker_ = std::thread(&PlannerNode::workerLoop, this);
 
@@ -154,7 +154,7 @@ class PlannerNode {
     cmd_pub_.publish(t);
   }
 
-  /// 主循环：等一帧比上次更新的 /scan（可选 min_decision_period 节流），串行推理一次。
+  /// Main loop: wait for a /scan newer than the last processed one (optional min_decision_period throttling), run one serial inference.
   void workerLoop() {
     while (ros::ok() && running_.load()) {
       sensor_msgs::LaserScanConstPtr scan;
@@ -194,18 +194,18 @@ class PlannerNode {
     }
   }
 
-  /// 对一帧雷达 + 最新 odom 做一次决策（推理或从 chunk 队列弹出），并下发。
+  /// Make one decision on a lidar frame + latest odom (infer or pop from the chunk queue), and publish.
   void processScan(const sensor_msgs::LaserScanConstPtr& scan,
                    const nav_msgs::OdometryConstPtr& odom) {
     if ((ros::Time::now() - scan->header.stamp).toSec() > scan_timeout_) {
-      ROS_WARN_THROTTLE(1.0, "[planner] scan 超时 %.1fs",
+      ROS_WARN_THROTTLE(1.0, "[planner] scan timeout %.1fs",
                         (ros::Time::now() - scan->header.stamp).toSec());
       pending_.clear();
       publishStop();
       return;
     }
 
-    // 用 tf2 实时查 laser -> base_link 的 yaw（绕 z 旋转）；失败用兜底参数
+    // Query the laser -> base_link yaw (rotation about z) live via tf2; use the fallback param on failure
     try {
       geometry_msgs::TransformStamped ts =
           tf_buffer_.lookupTransform("base_link", scan->header.frame_id, ros::Time(0));
@@ -215,11 +215,11 @@ class PlannerNode {
       tf2::Matrix3x3(q).getRPY(r, p, params_.laser_yaw_in_base);
     } catch (const tf2::TransformException& e) {
       params_.laser_yaw_in_base = laser_yaw_fallback_deg_ * M_PI / 180.0;
-      ROS_WARN_THROTTLE(2.0, "[planner] tf lookup 失败(%.40s)，用 fallback yaw=%.1fdeg",
+      ROS_WARN_THROTTLE(2.0, "[planner] tf lookup failed (%.40s), using fallback yaw=%.1fdeg",
                         e.what(), laser_yaw_fallback_deg_);
     }
 
-    // chunk 用尽 -> 推理一次拿新 chunk（推理前把上一 chunk 已执行动作写回 obs 的 prev 通道）
+    // chunk exhausted -> run one inference for a new chunk (write the previous chunk's executed actions back into obs's prev channel before inferring)
     if (pending_.empty()) {
       if (use_prev_action_) {
         obs_builder_->setPrevChunk(prev_history_);
@@ -256,7 +256,7 @@ class PlannerNode {
       }
     }
 
-    // 取当前步动作（引擎输出按 step 主序：每步 [lin, ang]；PPO N=1 -> 2 个元素）
+    // Take the current step's action (engine output is step-major: each step [lin, ang]; PPO N=1 -> 2 elements)
     const int n = 2;
     if (static_cast<int>(pending_.size()) < n) {
       pending_.clear();
@@ -267,11 +267,11 @@ class PlannerNode {
     float a_ang = pending_[1];
     pending_.erase(pending_.begin(), pending_.begin() + n);
 
-    // PPO 输出为 μ（无 tanh），必须先 clip 到 [-1,1] 再映射真实速度
+    // PPO output is μ (no tanh); must clip to [-1,1] before mapping to real velocity
     a_lin = std::max(-1.0f, std::min(1.0f, a_lin));
     a_ang = std::max(-1.0f, std::min(1.0f, a_ang));
 
-    // 记录本步已执行（clip 后）动作，供下一 chunk 推理时写回 obs 的 prev 通道
+    // Record this step's executed (clipped) actions, to write back into obs's prev channel at the next chunk inference
     if (use_prev_action_) {
       prev_history_.push_back(a_lin);
       prev_history_.push_back(a_ang);
@@ -319,10 +319,10 @@ class PlannerNode {
   std::condition_variable cv_;
   sensor_msgs::LaserScanConstPtr scan_;
   nav_msgs::OdometryConstPtr odom_;
-  ros::Time last_scan_stamp_;      // 上次已处理的那帧 scan 的时间戳
-  ros::Time last_decision_time_;   // 上次决策的墙钟时间（min_decision_period 节流用）
-  std::vector<float> pending_;     // 当前 chunk 剩余待执行动作（归一化，step 主序）
-  std::vector<float> prev_history_;  // 最近 chunk_size 步已执行动作（归一化，供 prev 通道）
+  ros::Time last_scan_stamp_;      // timestamp of the last processed scan frame
+  ros::Time last_decision_time_;   // wall-clock of the last decision (for min_decision_period throttling)
+  std::vector<float> pending_;     // remaining actions of the current chunk to execute (normalized, step-major)
+  std::vector<float> prev_history_;  // the most recent chunk_size steps of executed actions (normalized, for the prev channel)
 };
 
 }  // namespace ppo_nav

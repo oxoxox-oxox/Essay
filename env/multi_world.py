@@ -1,12 +1,14 @@
-"""多世界训练环境包装：每次 reset 随机换一个世界重建场景。
+"""Multi-world training env wrapper: picks a random world and rebuilds the scene on each reset.
 
-为什么这么做（重要）：
-    ir-sim 在同一进程内多实例并发是不安全的——模块级 config 代理（env_param/world_param
-    互相覆盖）、全局 rng、全局 matplotlib figure、全局对象 ID 计数器都是共享的
-    （见 doc/多环境调研结论）。本包装保证**任何时刻只有一个活跃 irsim 场景**，
-    在 reset 时关掉旧环境、按世界列表随机选一个重建，从而绕开所有全局状态冲突。
+Why this approach (important):
+    Running multiple ir-sim instances concurrently in one process is unsafe — the module-level
+    config proxies (env_param/world_param overwriting each other), the global rng, the global
+    matplotlib figure, and the global object-ID counter are all shared.
+    This wrapper guarantees that **only one irsim scene is active at any time**:
+    on reset it closes the old env and rebuilds a randomly chosen one, sidestepping all
+    global-state conflicts.
 
-用法（配合 train_ppo.py --worlds / configs/train.yaml 的 env.worlds）:
+Usage (with train_ppo.py --worlds / env.worlds in configs/train.yaml):
     entries = [
         {"world": "configs/world/robot_world.yaml"},
         {"world": "configs/world/open_field.yaml",
@@ -15,8 +17,8 @@
     ]
     env = MultiWorldIrSimEnv(entries, reward_cfg, obs_cfg, env_cfg, seed=0)
 
-接口与 IrSimEnv 一致（obs_dim / action_dim / reset / step_single / close），
-可直接被 PPOGymEnv 包装。obs 契约（lidar 100 束 ±90°、goal 3、prev 2）必须各世界一致。
+The interface matches IrSimEnv (obs_dim / action_dim / reset / step_single / close),
+so it can be wrapped directly by PPOGymEnv. The obs contract (lidar 100 beams ±90°, goal 3, prev 2) must be identical across worlds.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ _OVERRIDE_KEYS = ("start_range_low", "start_range_high", "fixed_goal")
 
 
 class MultiWorldIrSimEnv:
-    """单活跃场景、reset 随机换世界的多环境训练包装。"""
+    """Multi-env training wrapper with a single active scene, random world on reset."""
 
     def __init__(
         self,
@@ -43,7 +45,7 @@ class MultiWorldIrSimEnv:
         log_level: str = "WARNING",
     ) -> None:
         if not entries:
-            raise ValueError("MultiWorldIrSimEnv 需要至少一个世界")
+            raise ValueError("MultiWorldIrSimEnv requires at least one world")
         self._entries = [
             {**dict(e), "world": resolve_path(e["world"])} for e in entries
         ]
@@ -56,13 +58,13 @@ class MultiWorldIrSimEnv:
         self._env: IrSimEnv | None = None
         self._created = False
         self._create_env()
-        # 供 PPOGymEnv 使用
+        # for use by PPOGymEnv
         self.obs_dim = self._env.obs_dim
         self.action_dim = self._env.action_dim
 
     # ------------------------------------------------------------------ #
     def _create_env(self) -> None:
-        """关掉旧环境（含 figure），随机选一个世界重建。"""
+        """Close the old env (including its figure), pick a random world and rebuild."""
         if self._env is not None:
             self._env.close()
         entry = self._entries[int(self._rng.integers(len(self._entries)))]
@@ -84,7 +86,7 @@ class MultiWorldIrSimEnv:
 
     # ------------------------------------------------------------------ #
     def reset(self, random: bool = True) -> np.ndarray:
-        """换世界重建 + 随机起点（random_start 时）。"""
+        """Rebuild with a different world + random start (when random_start)."""
         if self._created:
             self._create_env()
         self._created = True

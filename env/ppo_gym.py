@@ -1,14 +1,14 @@
-"""SB3 PPO 用的 gymnasium 适配器：包一层 :class:`IrSimEnv`（与训练侧共用同一 obs/奖励契约）。
+"""gymnasium adapter for SB3 PPO: wraps an :class:`IrSimEnv` (shares the same obs/reward contract as the training side).
 
-把 IrSimEnv 的"裸"环境接口适配成 SB3 需要的 gymnasium 接口：
+Adapts IrSimEnv's "bare" env interface into the gymnasium interface SB3 needs:
     - reset() -> (obs, info)
     - step()  -> (obs, reward, terminated, truncated, info)
 
-动作契约（chunk 感知）：
-    - 网络输出归一化 [-1, 1]，shape = (chunk_size * action_dim,)。
-    - chunk_size=1：等价单步，调 IrSimEnv.step_single。
-    - chunk_size=N>1：reshape 成 (N, action_dim) 后调 IrSimEnv.step_chunk（开环执行 N 步）。
-    每步 [lin, ang] 由 IrSimEnv.scale_action 映射回真实速度。
+Action contract (chunk-aware):
+    - network output normalized to [-1, 1], shape = (chunk_size * action_dim,).
+    - chunk_size=1: equivalent to single-step, calls IrSimEnv.step_single.
+    - chunk_size=N>1: reshaped to (N, action_dim) then calls IrSimEnv.step_chunk (open-loop execution of N steps).
+    Each [lin, ang] is mapped back to real velocity by IrSimEnv.scale_action.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class PPOGymEnv(gym.Env):
         self.env = irsim_env
         self.chunk_size = max(1, int(chunk_size))
         obs_dim = irsim_env.obs_dim
-        # 网络动作 = chunk_size 步 × 每步 action_dim（归一化 [-1,1]）
+        # network action = chunk_size steps x action_dim per step (normalized [-1,1])
         net_action_dim = irsim_env.action_dim * self.chunk_size
 
         self.observation_space = gym.spaces.Box(
@@ -51,7 +51,7 @@ class PPOGymEnv(gym.Env):
             obs, reward, done, info = self.env.step_single(action)
         terminated = bool(info.get("arrive") or info.get("collision"))
         truncated = bool(info.get("timeout"))
-        # EvalCallback 用 is_success 统计成功率
+        # EvalCallback uses is_success to compute the success rate
         info["is_success"] = bool(info.get("arrive"))
         return obs.astype(np.float32), float(reward), terminated, truncated, info
 
